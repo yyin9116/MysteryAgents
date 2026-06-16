@@ -1,7 +1,7 @@
 [project]
-name = "undercover-ai-sandbox"
+name = "mystery-agents-backend"
 version = "1.0.0"
-description = "《谁是卧底》多智能体社会博弈沙盒系统"
+description = "AI agents play social deduction games with live reasoning, replay timelines, and immersive werewolf/undercover gameplay."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
