@@ -1,10 +1,11 @@
 #!/bin/bash
 
-# Undercover AI Sandbox - 本地演示版启动脚本
+# Mystery Agents - 本地演示版启动脚本
 
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BACKEND_DIR="$ROOT_DIR/backend"
 FRONTEND_DIR="$ROOT_DIR/frontend"
 LOG_DIR="$ROOT_DIR/logs"
@@ -20,7 +21,7 @@ NC='\033[0m'
 mkdir -p "$LOG_DIR"
 
 echo -e "${BLUE}========================================${NC}"
-echo -e "${BLUE}  Undercover AI Sandbox 本地演示版${NC}"
+echo -e "${BLUE}  Mystery Agents 本地演示版${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo
 
@@ -53,12 +54,20 @@ cd "$BACKEND_DIR"
 BACKEND_PID=$!
 
 echo -e "${BLUE}等待后端就绪...${NC}"
+BACKEND_READY=0
 for _ in {1..30}; do
     if curl -fsS http://localhost:8000/health >/dev/null 2>&1; then
+        BACKEND_READY=1
         break
     fi
     sleep 1
 done
+
+if [ "$BACKEND_READY" -ne 1 ]; then
+    echo -e "${YELLOW}后端未在 30 秒内就绪，请查看日志: $LOG_DIR/backend.log${NC}"
+    kill "$BACKEND_PID" >/dev/null 2>&1 || true
+    exit 1
+fi
 
 echo -e "${BLUE}启动前端服务...${NC}"
 cd "$FRONTEND_DIR"
@@ -72,7 +81,7 @@ echo -e "${GREEN}服务已启动${NC}"
 echo -e "后端 API: ${BLUE}http://localhost:8000${NC}"
 echo -e "前端应用: ${BLUE}http://localhost:5173${NC}"
 echo -e "日志目录: ${YELLOW}$LOG_DIR${NC}"
-echo -e "停止服务: ${YELLOW}./stop.sh${NC}"
+echo -e "停止服务: ${YELLOW}./scripts/stop.sh${NC}"
 
 auto_stop() {
     echo

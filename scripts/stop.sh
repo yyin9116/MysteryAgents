@@ -1,17 +1,18 @@
 #!/bin/bash
 
-# Undercover AI Sandbox - 停止本地演示版服务
+# Mystery Agents - 停止本地演示版服务
 
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PID_FILE="$ROOT_DIR/.pids"
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-echo -e "${YELLOW}正在停止 Undercover AI Sandbox 服务...${NC}"
+echo -e "${YELLOW}正在停止 Mystery Agents 服务...${NC}"
 
 if [ -f "$PID_FILE" ]; then
     while read -r pid; do

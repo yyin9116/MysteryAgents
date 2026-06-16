@@ -63,7 +63,7 @@ cd ..
 Start both services:
 
 ```bash
-./start.sh
+./scripts/start.sh
 ```
 
 Open the app:
@@ -76,7 +76,7 @@ Open the app:
 Stop services:
 
 ```bash
-./stop.sh
+./scripts/stop.sh
 ```
 
 ## Manual Development
@@ -109,7 +109,7 @@ VITE_API_BASE_URL=http://localhost:8000
 Run the local demo validation script:
 
 ```bash
-./run_all_tests.sh
+./scripts/run_all_tests.sh
 ```
 
 The script starts the backend, runs the core integration flows, prints a pass/fail summary, and stops the backend.
@@ -135,10 +135,8 @@ pytest tests
 backend/      FastAPI service, game orchestration, replay storage, model config APIs
 frontend/     React/Vite UI for configuration, gameplay, replays, and visual effects
 tests/        Cross-module local demo integration checks
-scripts/      Real-game smoke and slower Werewolf test helpers
+scripts/      Local service, validation, and real-game smoke helpers
 assets/       README and product assets tracked by Git
-start.sh      Local service launcher
-stop.sh       Local service stopper
 ```
 
 ## Runtime Data And Safety

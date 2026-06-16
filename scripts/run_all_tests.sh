@@ -5,8 +5,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BACKEND_DIR="$SCRIPT_DIR/backend"
-INTEGRATION_TEST_DIR="$SCRIPT_DIR/tests/integration"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+BACKEND_DIR="$ROOT_DIR/backend"
+INTEGRATION_TEST_DIR="$ROOT_DIR/tests/integration"
 BACKEND_PYTHON_DEFAULT="/opt/anaconda3/envs/scienv/bin/python"
 BACKEND_PYTHON="${BACKEND_PYTHON:-$BACKEND_PYTHON_DEFAULT}"
 
@@ -60,7 +61,7 @@ run_python_test() {
     local label=$1
     local script=$2
     echo -e "${BLUE}运行: $label${NC}"
-    cd "$SCRIPT_DIR"
+    cd "$ROOT_DIR"
     if env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy \
         "$BACKEND_PYTHON" "$script"; then
         echo -e "${GREEN}$label 通过${NC}"
