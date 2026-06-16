@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test</title>
+</head>
+<body>
+    <div id="root">Testing if React loads...</div>
+    <script>
+        console.log('Script loaded');
+        setTimeout(() => {
+            const root = document.getElementById('root');
+            if (root) {
+                root.innerHTML = '<h1 style="color: red;">React should render here</h1>';
+            }
+        }, 1000);
+    </script>
+</body>
+</html>

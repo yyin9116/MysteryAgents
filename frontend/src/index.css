@@ -1,0 +1,129 @@
+@import "tailwindcss";
+@import "./styles/theme.css";
+@import "./styles/animations.css";
+
+@theme {
+  --color-primary: var(--primary);
+  --color-secondary: var(--secondary);
+  --color-accent: var(--accent);
+  --color-background: var(--bg-main);
+  --color-card: var(--bg-card);
+  --color-text: var(--text-bright);
+  --color-text-muted: var(--text-muted);
+  
+  /* 狼人杀暗黑神秘风扩展 */
+  --color-ww-bg: #0f0f0f;
+  --color-ww-deep-purple: #1a0b2e;
+  --color-ww-gold: #ffd700;
+  --color-ww-red: #ff4444;
+  --color-ww-glow-gold: rgba(255, 215, 0, 0.5);
+  --color-ww-glow-red: rgba(255, 68, 68, 0.5);
+}
+
+@layer base {
+  body {
+    @apply bg-background text-text font-sans antialiased;
+    background-color: var(--bg-main);
+    color: var(--text-bright);
+  }
+}
+
+@layer components {
+  .glass {
+    background: var(--bg-glass);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--border-glass);
+    box-shadow: var(--shadow-glass);
+  }
+  
+  .glass-card {
+    background: var(--bg-glass);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--border-glass);
+    box-shadow: var(--shadow-glass);
+    @apply rounded-xl transition-all duration-300;
+  }
+
+  .glass-card:hover {
+    @apply border-white/20 scale-[1.02] shadow-2xl;
+    background: rgba(255, 255, 255, 0.08);
+  }
+  
+  .glass-dark {
+    @apply bg-black/30 backdrop-blur-lg border border-white/10 shadow-2xl;
+  }
+
+  .ww-glass {
+    @apply bg-black/40 backdrop-blur-xl border border-white/5 shadow-[0_8px_32px_0_rgba(0,0,0,0.8)];
+  }
+}
+
+@layer utilities {
+  .scrollbar-none {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* 淡入动画 */
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  
+  .animate-fadeIn {
+    animation: fadeIn 0.3s ease-in-out;
+  }
+  
+  /* 上滑动画 */
+  @keyframes slideUp {
+    from {
+      transform: translateY(20px);
+      opacity: 0;
+    }
+    to {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+  
+  .animate-slideUp {
+    animation: slideUp 0.4s ease-out;
+  }
+
+  /* 呼吸灯动画 */
+  @keyframes pulse-glow-gold {
+    0%, 100% {
+      box-shadow: 0 0 15px var(--color-ww-glow-gold), inset 0 0 5px var(--color-ww-glow-gold);
+    }
+    50% {
+      box-shadow: 0 0 30px var(--color-ww-glow-gold), inset 0 0 10px var(--color-ww-glow-gold);
+    }
+  }
+
+  @keyframes pulse-glow-red {
+    0%, 100% {
+      box-shadow: 0 0 15px var(--color-ww-glow-red), inset 0 0 5px var(--color-ww-glow-red);
+    }
+    50% {
+      box-shadow: 0 0 30px var(--color-ww-glow-red), inset 0 0 10px var(--color-ww-glow-red);
+    }
+  }
+
+  .animate-glow-gold {
+    animation: pulse-glow-gold 3s infinite ease-in-out;
+  }
+
+  .animate-glow-red {
+    animation: pulse-glow-red 3s infinite ease-in-out;
+  }
+}

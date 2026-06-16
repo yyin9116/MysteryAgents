@@ -1,0 +1,51 @@
+# Logs
+logs/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+.pytest_cache/
+.coverage
+
+# IDE / agent artifacts
+.vscode/
+.idea/
+*.swp
+*.swo
+.claude/
+CLAUDE.md
+
+# Environment
+.env
+.env.local
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Runtime state
+game_states/
+*.pkl
+*.pickle
+user_configs/
+
+# Vector stores
+chroma_db/
+qdrant_storage/
+
+# Non-core backend content
+UV_SETUP.md
+tests/manual/
+
+# Misgenerated nested directories
+backend/
+frontend/

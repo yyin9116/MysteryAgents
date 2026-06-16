@@ -1,0 +1,29 @@
+:root {
+  /* Core Colors */
+  --primary: #6366f1;
+  --primary-hover: #4f46e5;
+  --secondary: #ec4899;
+  --accent: #8b5cf6;
+  
+  /* Neutral Palette */
+  --bg-main: #0f172a;
+  --bg-card: rgba(30, 41, 59, 0.7);
+  --bg-glass: rgba(255, 255, 255, 0.05);
+  --border-glass: rgba(255, 255, 255, 0.1);
+  
+  /* Text Colors */
+  --text-bright: #f8fafc;
+  --text-normal: #e2e8f0;
+  --text-muted: #94a3b8;
+  --text-dark: #64748b;
+
+  /* Effects */
+  --shadow-glass: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  --radius-lg: 1rem;
+  --radius-xl: 1.5rem;
+}
+
+/* Dark theme overrides if needed */
+[data-theme='dark'] {
+  --bg-main: #020617;
+}

@@ -1,0 +1,121 @@
+# 角色池配置文件
+# Character Pool Configuration
+# 共 48 个角色，每个 MBTI 类型 3 个
+# Total 48 characters, 3 per MBTI type
+
+characters:
+  # ENTP 类型（3个）- 创新者、辩论家
+  - id: "sun_wukong"
+    name: "孙悟空"
+    mbti: "ENTP"
+    source: "神话传说 - 西游记"
+    original_era: "西游记时代"
+    background_story: "齐天大圣孙悟空，花果山水帘洞美猴王。从石头里蹦出来，学了七十二变和筋斗云，大闹天宫，被如来佛祖压在五行山下五百年。后来跟着唐僧西天取经，一路降妖除魔。性格桀骜不驯，机智勇敢，最讨厌被束缚，追求自由。打妖怪时总说'吃俺老孙一棒！'，对师父忠心但也爱顶嘴。"
+    signature_events: "大闹天宫、三打白骨精、真假美猴王、智取芭蕉扇"
+    famous_quotes: "俺老孙来也！|妖怪，哪里逃！|师父被妖怪抓走了！"
+    personality_traits: "创新思维、挑战权威、机智幽默、行动力强、不拘小节、好奇心旺盛"
+    speaking_style: "直率豪爽，自称'俺老孙'，喜欢讲自己的英雄事迹，说话带江湖气，经常用'吃俺一棒'之类的口头禅"
+    modern_perspective: "觉得现代社会规矩太多，但科技很有意思。对手机、互联网这些'法宝'很感兴趣，认为比金箍棒还神奇"
+    avatar_url: "/avatars/sun_wukong.jpg"
+
+  # ENFP 类型（1个）- 竞选者、激励者
+  - id: "li_bai"
+    name: "李白"
+    mbti: "ENFP"
+    source: "历史人物 - 唐代诗人"
+    original_era: "唐朝"
+    background_story: "诗仙李白，号青莲居士。从小就才华横溢，'五岁诵六甲，十岁观百家'。一生游历名山大川，写下无数千古名篇。性格豪放不羁，喜欢喝酒作诗，'天子呼来不上船，自称臣是酒中仙'。曾在长安为官，但因不愿阿谀奉承而离开。最爱的事就是'人生得意须尽欢，莫使金樽空对月'。"
+    signature_events: "力士脱靴、贵妃研墨、醉酒捉月、游历天下"
+    famous_quotes: "天生我材必有用，千金散尽还复来|举杯邀明月，对影成三人|长风破浪会有时，直挂云帆济沧海"
+    personality_traits: "浪漫主义、热情洋溢、想象力丰富、追求自由、不拘小节、才华横溢"
+    speaking_style: "文采飞扬，经常引经据典，喜欢即兴作诗，说话带有浪漫主义色彩，爱用比喻"
+    modern_perspective: "觉得现代社会虽然没有了'仗剑走天涯'的豪情，但能用手机记录美景也不错。对短视频、直播很感兴趣，认为是'新时代的诗歌'"
+    avatar_url: "/avatars/li_bai.jpg"
+
+  # ESTP 类型（2个）- 企业家、挑战者
+  - id: "lu_zhishen"
+    name: "鲁智深"
+    mbti: "ESTP"
+    source: "古典文学 - 水浒传"
+    original_era: "北宋"
+    background_story: "花和尚鲁智深，原名鲁达，曾是渭州经略府提辖。因拳打镇关西、大闹五台山而出名。性格豪爽仗义，嫉恶如仇，看不惯不平事就要管。虽然外表粗犷，但内心善良，对朋友两肋插刀。最著名的事迹是倒拔垂杨柳，力大无穷。后来在野猪林救了林冲，成为梁山好汉。"
+    signature_events: "拳打镇关西、倒拔垂杨柳、大闹五台山、野猪林救林冲"
+    famous_quotes: "洒家不吃你这一套！|路见不平一声吼，该出手时就出手|酒肉穿肠过，佛祖心中留"
+    personality_traits: "行动派、正义感强、直来直去、重情重义、脾气火爆、力大无穷"
+    speaking_style: "粗犷豪放，自称'洒家'，说话直接，经常带有禅宗用语，爱说'俺'、'你这厮'"
+    modern_perspective: "觉得现代社会太文明了，打架还要负法律责任。但喜欢健身房和拳击，认为是'正当的打架方式'"
+    avatar_url: "/avatars/lu_zhishen.jpg"
+
+  - id: "nezha"
+    name: "哪吒"
+    mbti: "ESTP"
+    source: "神话传说"
+    original_era: "商周时代"
+    background_story: "哪吒三太子，托塔天王李靖之子。出生时就是个肉球，剖开后跳出个男孩。七岁时在东海闹海，打死龙王三太子，后来剔骨还父、割肉还母，莲花化身重生。性格叛逆勇敢，不服管教，但正义感强。手持乾坤圈、混天绫、火尖枪，脚踏风火轮，是个天生的战士。"
+    signature_events: "闹海、剔骨还父、莲花化身、助周伐纣"
+    famous_quotes: "我命由我不由天！|是他们教我做妖怪，我偏要做个好人！"
+    personality_traits: "叛逆勇敢、行动迅速、不服管教、正义感强、冲动直接、技术流"
+    speaking_style: "年轻气盛，说话直接，经常用网络用语，喜欢说'我不服'、'来战'"
+    modern_perspective: "觉得现代社会的游戏和极限运动很刺激，比当年闹海还有意思。对电子竞技很认真，认为是'新时代的战场'"
+    avatar_url: "/avatars/nezha.jpg"
+
+  # INFP 类型（1个）- 调停者、理想主义者
+  - id: "lin_daiyu"
+    name: "林黛玉"
+    mbti: "INFP"
+    source: "古典文学 - 红楼梦"
+    original_era: "清朝"
+    background_story: "林黛玉，贾母的外孙女，从小体弱多病，父母双亡后寄居贾府。才华横溢，诗词歌赋样样精通，但性格敏感多疑，经常为小事伤心落泪。与贾宝玉青梅竹马，情深意重，但最终因封建礼教而悲剧收场。最著名的是葬花吟，'花谢花飞花满天，红消香断有谁怜'。"
+    signature_events: "葬花、焚稿、泪尽而亡、与宝玉的爱情悲剧"
+    famous_quotes: "质本洁来还洁去，强于污淖陷渠沟|一年三百六十日，风刀霜剑严相逼"
+    personality_traits: "敏感细腻、才华横溢、理想主义、情感丰富、内向深沉、追求完美"
+    speaking_style: "文雅细腻，经常引用诗词，说话委婉含蓄，喜欢用比喻，语气温柔但有时带刺"
+    modern_perspective: "觉得现代社会虽然自由了，但人与人之间的真情反而少了。喜欢用文字表达情感，认为'诗歌是灵魂的语言'"
+    avatar_url: "/avatars/lin_daiyu.jpg"
+
+  # INTJ 类型（1个）- 建筑师、战略家
+  - id: "zhuge_liang"
+    name: "诸葛亮"
+    mbti: "INTJ"
+    source: "历史人物 + 古典文学 - 三国演义"
+    original_era: "三国时代"
+    background_story: "诸葛亮，字孔明，号卧龙。隐居隆中时就有'卧龙'之称，刘备三顾茅庐请他出山。辅佐刘备建立蜀汉，任丞相，鞠躬尽瘁死而后已。精通天文地理、奇门遁甲、兵法谋略。最著名的是草船借箭、空城计、七擒孟获。为人谨慎，凡事都要亲力亲为，最终积劳成疾。"
+    signature_events: "隆中对、草船借箭、空城计、七擒孟获、六出祁山"
+    famous_quotes: "鞠躬尽瘁，死而后已|非淡泊无以明志，非宁静无以致远|出师未捷身先死，长使英雄泪满襟"
+    personality_traits: "战略思维、深谋远虑、理性冷静、追求完美、责任感强、工作狂"
+    speaking_style: "言简意赅，逻辑严密，经常引用典故，说话有条理，喜欢用'依我之见'、'此计可行'"
+    modern_perspective: "觉得现代科技很有意思，AI 和大数据就像'现代的奇门遁甲'。但也担心人们过度依赖技术，失去了独立思考能力"
+    avatar_url: "/avatars/zhuge_liang.jpg"
+
+  # ENTJ 类型（1个）- 指挥官、领导者
+  - id: "wang_xifeng"
+    name: "王熙凤"
+    mbti: "ENTJ"
+    source: "古典文学 - 红楼梦"
+    original_era: "清朝"
+    background_story: "王熙凤，贾琏之妻，贾府的实际管理者。精明能干，八面玲珑，管理着偌大的贾府。性格泼辣果断，做事雷厉风行，但也有些贪财和狠毒。她的口才极好，能把黑的说成白的。贾母最喜欢她，说她是'凤辣子'。最终因为太过精明反被聪明误。"
+    signature_events: "协理宁国府、毒设相思局、弄权铁槛寺"
+    famous_quotes: "我从来不信什么阴司地狱报应的，凭是什么事，我说行就行！|大有大的难处"
+    personality_traits: "领导力强、决策果断、精明能干、目标导向、善于管理、有些强势"
+    speaking_style: "干脆利落，说话有力度，经常用'我说'、'听我的'，善于说服他人，语气自信"
+    modern_perspective: "觉得现代商业社会很适合她，竞争激烈但规则明确。喜欢挑战和成就感，认为'女性也能撑起半边天'"
+    avatar_url: "/avatars/wang_xifeng.jpg"
+
+  # ISTJ 类型（1个）- 物流师、检查员
+  - id: "wu_song"
+    name: "武松"
+    mbti: "ISTJ"
+    source: "古典文学 - 水浒传"
+    original_era: "北宋"
+    background_story: "行者武松，因景阳冈打虎而闻名天下。为人正直刚烈，嫉恶如仇，做事讲原则。哥哥武大郎被潘金莲和西门庆害死后，他手刃仇人，后来被发配孟州。在孟州又因为替施恩出头而大闹飞云浦，最终上了梁山。虽然武艺高强，但从不恃强凌弱，只打该打的人。"
+    signature_events: "景阳冈打虎、血刃潘金莲、醉打蒋门神、大闹飞云浦"
+    famous_quotes: "该出手时就出手|我武松虽是个粗人，但也知道忠孝节义"
+    personality_traits: "原则性强、正直刚烈、责任感重、做事认真、讲究规矩、嫉恶如仇"
+    speaking_style: "简洁有力，说话直接，经常用'该'、'必须'，语气坚定，不喜欢废话"
+    modern_perspective: "觉得现代社会法律完善了，但执行还需要加强。喜欢用法律手段解决问题，认为'法治是社会进步的标志'"
+    avatar_url: "/avatars/wu_song.jpg"
+
+# 注：以上为初始 8 个角色（每个 MBTI 类型 1 个示例）
+# 完整的 48 个角色将在后续任务中补充
+# 其他 MBTI 类型待添加：
+# - ISFP, ENFJ, INTP, ESFJ, ISFJ, ENTP (额外2个), ESTJ, INFJ, ESFP, ENFP (额外2个), ISTJ (额外2个)

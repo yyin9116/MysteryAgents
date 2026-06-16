@@ -1,0 +1,96 @@
+/* 3D Flip Animations */
+.perspective-1000 {
+  perspective: 1000px;
+}
+
+.transform-style-3d {
+  transform-style: preserve-3d;
+}
+
+.backface-hidden {
+  backface-visibility: hidden;
+}
+
+.rotate-y-180 {
+  transform: rotateY(180deg);
+}
+
+/* Aura Animations */
+@keyframes aura-pulse-red {
+  0% { box-shadow: 0 0 0 0 rgba(255, 68, 68, 0.4); }
+  70% { box-shadow: 0 0 0 10px rgba(255, 68, 68, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 68, 68, 0); }
+}
+
+@keyframes aura-glow-red {
+  0%, 100% { box-shadow: 0 0 15px rgba(255, 68, 68, 0.5), 0 0 30px rgba(255, 68, 68, 0.3); }
+  50% { box-shadow: 0 0 25px rgba(255, 68, 68, 0.8), 0 0 50px rgba(255, 68, 68, 0.5); }
+}
+
+@keyframes aura-stable-gold {
+  0%, 100% { box-shadow: 0 0 15px rgba(255, 215, 0, 0.6), 0 0 30px rgba(255, 215, 0, 0.4); }
+}
+
+@keyframes aura-flow-purple {
+  0% { box-shadow: 0 0 15px rgba(168, 85, 247, 0.5), 0 0 25px rgba(168, 85, 247, 0.3); }
+  50% { box-shadow: 0 0 25px rgba(168, 85, 247, 0.7), 0 0 35px rgba(147, 51, 234, 0.5); }
+  100% { box-shadow: 0 0 15px rgba(168, 85, 247, 0.5), 0 0 25px rgba(168, 85, 247, 0.3); }
+}
+
+@keyframes aura-shield-blue {
+  0%, 100% { box-shadow: 0 0 10px rgba(59, 130, 246, 0.6), inset 0 0 10px rgba(59, 130, 246, 0.4); border-color: rgba(59, 130, 246, 0.8); }
+  50% { box-shadow: 0 0 20px rgba(59, 130, 246, 0.8), inset 0 0 20px rgba(59, 130, 246, 0.6); border-color: rgba(59, 130, 246, 1); }
+}
+
+@keyframes aura-flicker-orange {
+  0% { box-shadow: 0 0 12px rgba(249, 115, 22, 0.6); }
+  25% { box-shadow: 0 0 18px rgba(249, 115, 22, 0.8); }
+  50% { box-shadow: 0 0 10px rgba(249, 115, 22, 0.5); }
+  75% { box-shadow: 0 0 20px rgba(249, 115, 22, 0.9); }
+  100% { box-shadow: 0 0 12px rgba(249, 115, 22, 0.6); }
+}
+
+@keyframes aura-faint-white {
+  0%, 100% { box-shadow: 0 0 5px rgba(255, 255, 255, 0.3); }
+  50% { box-shadow: 0 0 10px rgba(255, 255, 255, 0.5); }
+}
+
+.aura-werewolf {
+  animation: aura-glow-red 2s infinite ease-in-out;
+}
+
+.aura-seer {
+  animation: aura-stable-gold 3s infinite linear;
+}
+
+.aura-witch {
+  animation: aura-flow-purple 4s infinite ease-in-out;
+}
+
+.aura-guard {
+  animation: aura-shield-blue 2s infinite ease-in-out;
+}
+
+.aura-hunter {
+  animation: aura-flicker-orange 0.8s infinite steps(4);
+}
+
+.aura-villager {
+  animation: aura-faint-white 5s infinite ease-in-out;
+}
+
+/* Death State */
+.card-dead {
+  filter: grayscale(100%) opacity(0.6);
+  transition: filter 0.5s ease;
+}
+
+/* Hover Scale Wrapper */
+.card-hover-wrapper {
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.card-hover-wrapper:hover {
+  transform: scale(1.05);
+  z-index: 20;
+}
