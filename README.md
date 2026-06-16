@@ -2,70 +2,180 @@
 
 AI agents play social deduction games with live reasoning, replay timelines, and immersive werewolf/undercover gameplay.
 
-面向本地演示的多智能体社交博弈沙盒，包含《谁是卧底》、讨论模式和狼人杀。
+Mystery Agents is a local demo sandbox for multi-agent social deduction games. It currently includes Werewolf, Undercover, and discussion-mode experiments, with model configuration, live game events, saved replays, and visual timelines for reviewing how agents reasoned through a match.
 
-## 发布定位
+![Werewolf game screen](assets/readme/werewolf-page.png)
 
-当前仓库按“本地演示版”整理：
-- 仅保留核心代码、核心测试、核心说明文档
-- 非核心开发过程资料和手动测试脚本不纳入 Git
-- 不面向公网生产部署（无多实例、高可用、完整安全加固）
+## What It Does
 
-## 快速开始
+- Runs local social deduction game flows backed by configurable LLM providers.
+- Supports Werewolf and Undercover-style multi-agent gameplay.
+- Shows live phases, speeches, votes, eliminations, and game-over summaries.
+- Saves replay timelines for later review and debugging.
+- Includes frontend and backend tests for core local-demo workflows.
 
-### 依赖
+## Screenshots
+
+![Werewolf timeline replay](assets/readme/werewolf-timeline-replay-visual.png)
+
+![Standardized discussion event card](assets/readme/werewolf-timeline-discussion-card.png)
+
+## Project Status
+
+This repository is organized as a local demo build, not a production SaaS deployment. It is intended for development, local evaluation, and agent-game experimentation.
+
+Current boundaries:
+
+- No public multi-tenant deployment hardening is claimed.
+- Runtime databases, logs, model credentials, and generated state are intentionally ignored by Git.
+- Local model/API configuration is required before running real game flows.
+
+## Requirements
 
 - Python 3.10+
 - Node.js 18+
+- npm
 
-### 1) 配置后端
+The backend can be run with the system Python/Conda environment or the project virtual environment. The included helper scripts default to a local Python path but can be overridden with `BACKEND_PYTHON`.
+
+## Quick Start
+
+```bash
+git clone https://github.com/yyin9116/MysteryAgents.git
+cd MysteryAgents
+```
+
+Create environment files:
+
+```bash
+cp backend/.env.example backend/.env
+cp frontend/.env.example frontend/.env
+```
+
+Install frontend dependencies:
+
+```bash
+cd frontend
+npm install
+cd ..
+```
+
+Start both services:
+
+```bash
+./start.sh
+```
+
+Open the app:
+
+- Frontend: `http://localhost:5173`
+- Backend API: `http://localhost:8000`
+- API docs: `http://localhost:8000/docs`
+- Health check: `http://localhost:8000/health`
+
+Stop services:
+
+```bash
+./stop.sh
+```
+
+## Manual Development
+
+Run the backend:
 
 ```bash
 cd backend
 cp .env.example .env
+python3 main.py
 ```
 
-### 2) 配置前端
+Run the frontend:
 
 ```bash
 cd frontend
 cp .env.example .env
 npm install
+npm run dev
 ```
 
-### 3) 启动与停止
+If the frontend cannot reach the backend, check `frontend/.env`:
 
-```bash
-./start.sh
-./stop.sh
+```env
+VITE_API_BASE_URL=http://localhost:8000
 ```
 
-启动后访问：
-- 前端：`http://localhost:5173`
-- 后端：`http://localhost:8000`
-- API 文档：`http://localhost:8000/docs`
+## Testing
 
-## 验证
+Run the local demo validation script:
 
 ```bash
 ./run_all_tests.sh
 ```
 
-## 仓库结构（核心）
+The script starts the backend, runs the core integration flows, prints a pass/fail summary, and stops the backend.
 
-- `backend/`：后端服务与核心测试
-- `frontend/`：前端应用
-- `tests/integration/`：跨模块集成脚本
-- `README_START.md`：启动说明
-- `README_TESTS.md`：测试说明
-- `start.sh` / `stop.sh` / `run_all_tests.sh`：核心脚本
+Frontend checks:
 
-## Git 收敛策略
+```bash
+cd frontend
+npm test
+npm run build
+```
 
-- `docs/` 已默认加入 `.gitignore`，不作为 Git 核心发布内容
-- 手动测试脚本、开发日志、代理工作流目录默认不纳入 Git
-- 运行时产物（数据库、日志、缓存、构建目录）默认忽略
+Backend tests:
+
+```bash
+cd backend
+pytest tests
+```
+
+## Repository Map
+
+```text
+backend/      FastAPI service, game orchestration, replay storage, model config APIs
+frontend/     React/Vite UI for configuration, gameplay, replays, and visual effects
+tests/        Cross-module local demo integration checks
+scripts/      Real-game smoke and slower Werewolf test helpers
+assets/       README and product assets tracked by Git
+start.sh      Local service launcher
+stop.sh       Local service stopper
+```
+
+## Runtime Data And Safety
+
+The following are local runtime artifacts and should not be committed:
+
+- `.env` files and model/API credentials
+- SQLite databases such as `undercover_ai.db`
+- `game_states/`
+- logs, caches, build outputs, and browser automation traces
+- `.omx/` and `.playwright-mcp/`
+
+These are covered by `.gitignore` so the repository stays focused on source, tests, and product documentation.
+
+## Troubleshooting
+
+Port already in use:
+
+```bash
+lsof -ti:8000
+lsof -ti:5173
+kill <PID>
+```
+
+Backend health check:
+
+```bash
+curl http://localhost:8000/health
+```
+
+Logs from helper scripts:
+
+```bash
+tail -f logs/backend.log
+tail -f logs/frontend.log
+```
 
 ## License
 
-MIT，见 `LICENSE`。
+MIT. See [LICENSE](LICENSE).
