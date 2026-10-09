@@ -5,7 +5,8 @@ Supports multiple providers: OpenAI, Alibaba Qwen, Anthropic, Ollama
 """
 
 import json
-from typing import Dict, Any, Optional
+import re
+from typing import Dict, Any, List, Optional
 import httpx
 from litellm import acompletion, completion_cost
 from pydantic import BaseModel, Field, ConfigDict, field_validator
@@ -14,6 +15,8 @@ logger = logging.getLogger(__name__)
 
 from config.settings import settings
 from services.usage_store import UsageStore
+from services import prompt_registry
+from utils import opencode_compat
 
 
 class AgentResponse(BaseModel):
@@ -21,19 +24,43 @@ class AgentResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     thought: str = Field(..., max_length=500)
-    speech: str = Field(..., max_length=220)
+    speech: str = Field(..., max_length=600)
     suspicion: Dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator('thought', mode='before')
+    @classmethod
+    def clip_thought(cls, v: Any) -> Any:
+        # LLM 无法精确控制长度：超长截断而不是让整次调用作废
+        return v[:500] if isinstance(v, str) else v
+
+    @field_validator('speech', mode='before')
+    @classmethod
+    def clip_speech(cls, v: Any) -> Any:
+        return v[:600] if isinstance(v, str) else v
 
     @field_validator('suspicion', mode='before')
     @classmethod
     def validate_suspicion_scores(cls, v: Dict[str, Any]) -> Dict[str, int]:
+        """宽容解析怀疑度：LLM 偶尔返回 {'char_id': x, 'score': n} 之类对象或字符串数字，
+        尽力提取数值；无法解析的条目直接跳过，绝不让整次模型调用作废重试。"""
         normalized: Dict[str, int] = {}
-        for agent_id, score in v.items():
+        for agent_id, score in (v or {}).items():
+            value = score
+            if isinstance(value, dict):
+                # 形如 {'char_id': ..., 'score': 5} 的对象：取其中数值字段
+                for key in ('score', 'suspicion', 'value', 'level'):
+                    if isinstance(value.get(key), (int, float, str)):
+                        value = value[key]
+                        break
+                else:
+                    continue  # 提不出数值：跳过该条
+            if isinstance(value, bool) or value is None:
+                continue
             try:
-                numeric_score = float(score)
+                numeric_score = float(value)
                 normalized[agent_id] = max(0, min(10, int(round(numeric_score))))
-            except (TypeError, ValueError) as exc:
-                raise ValueError(f"Suspicion score must be int-like, got {type(score)}") from exc
+            except (TypeError, ValueError):
+                continue  # 解析失败：跳过该条而不是作废整次调用
         return normalized
 
     @field_validator('speech')
@@ -51,6 +78,48 @@ class VoteResponse(BaseModel):
     confidence: float = Field(..., ge=0.0, le=1.0)
 
 
+class ChatResponse(BaseModel):
+    """Validated group-chat style response schema（QQ/微信群聊多条短消息）."""
+    model_config = ConfigDict(extra="allow")
+
+    thought: str = Field(..., max_length=500)
+    messages: List[str] = Field(default_factory=list)
+    suspicion: Dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator('thought', mode='before')
+    @classmethod
+    def clip_thought(cls, v: Any) -> Any:
+        return v[:500] if isinstance(v, str) else v
+
+    @field_validator('messages', mode='before')
+    @classmethod
+    def coerce_messages(cls, v: Any) -> Any:
+        # 兼容模型只回一条字符串的情况
+        if isinstance(v, str):
+            v = [v]
+        if not isinstance(v, list):
+            return []
+        cleaned = [str(item).strip() for item in v if str(item).strip()]
+        return cleaned[:4]
+
+    @field_validator('messages')
+    @classmethod
+    def clamp_messages(cls, v: List[str]) -> List[str]:
+        # 单条气泡过长说明模型没按群聊风格输出，截断保持观感
+        return [item[:80] for item in v]
+
+    @field_validator('suspicion', mode='before')
+    @classmethod
+    def validate_suspicion_scores(cls, v: Dict[str, Any]) -> Dict[str, int]:
+        normalized: Dict[str, int] = {}
+        for agent_id, score in (v or {}).items():
+            try:
+                normalized[agent_id] = max(0, min(10, int(round(float(score)))))
+            except (TypeError, ValueError):
+                continue
+        return normalized
+
+
 class LLMService:
     """Service for LLM interactions using LiteLLM."""
     
@@ -58,6 +127,10 @@ class LLMService:
         self.timeout = settings.LLM_TIMEOUT
         self.max_retries = settings.LLM_MAX_RETRIES
         self.usage_store = usage_store or UsageStore()
+        # Stable session id used for OpenCode Go routing when callers don't
+        # provide a per-conversation session id.
+        import uuid
+        self._opencode_session_id = f"killer-{uuid.uuid4()}"
         
     def _get_model_for_iq(self, iq_level: str) -> str:
         """Get the appropriate model for the given IQ level."""
@@ -99,7 +172,7 @@ class LLMService:
         provider, _, model_name = model.partition("/")
         if not model_name:
             return model
-        if provider.lower() in {"alibaba", "zhipu"}:
+        if provider.lower() in {"alibaba", "zhipu", "opencode"}:
             return f"openai/{model_name}"
         return model
     
@@ -198,6 +271,18 @@ class LLMService:
                 return agent_id
         return None
     
+    # 思考强度（reasoning_effort）只对推理系模型注入：非推理模型收到该参数会直接 400
+    _REASONING_MODEL_PATTERN = re.compile(
+        r"(o[134](-mini|-pro)?|gpt-5|deepseek-r1|grok-[34]|gemini-2\.5|qwen3|glm-4\.[5-9]|magistral|thinking|reasoner)",
+        re.IGNORECASE,
+    )
+
+    @classmethod
+    def _model_supports_reasoning_effort(cls, model: Optional[str]) -> bool:
+        """Whether the model id looks like a reasoning-capable family."""
+        model_id = (model or "").lower().rpartition("/")[-1]
+        return bool(cls._REASONING_MODEL_PATTERN.search(model_id))
+
     def _get_llm_params(self, model: str, model_config: Optional[Dict[str, Any]] = None) -> dict:
         """Get additional parameters needed for specific LLM providers."""
         params = {}
@@ -216,6 +301,9 @@ class LLMService:
                 params["api_base"] = settings.ZHIPU_BASE_URL
             extra_params = model_config.get("extra_params") or {}
             params.update(extra_params)
+            # 非推理模型不支持 reasoning_effort，剔除避免 400
+            if params.get("reasoning_effort") and not self._model_supports_reasoning_effort(model):
+                params.pop("reasoning_effort", None)
             return params
         
         # Alibaba Qwen models use OpenAI-compatible API
@@ -237,12 +325,12 @@ class LLMService:
 
     @staticmethod
     def _should_use_openai_compatible_http(model_config: Optional[Dict[str, Any]]) -> bool:
-        """Use direct HTTP for local OpenAI-compatible endpoints that LiteLLM may mis-decode."""
+        """Use direct HTTP for OpenAI-compatible endpoints configured with base_url."""
         if not model_config:
             return False
         provider = (model_config.get("provider") or "").lower()
         base_url = (model_config.get("base_url") or "").strip()
-        return provider == "openai" and bool(base_url)
+        return provider in {"openai", "opencode"} and bool(base_url)
 
     async def _acompletion_openai_compatible(
         self,
@@ -253,9 +341,14 @@ class LLMService:
         max_tokens: Optional[int] = None,
         response_format: Optional[Dict[str, str]] = None,
         timeout: Optional[float] = None,
+        session_id: Optional[str] = None,
         **extra_params: Any,
     ) -> Dict[str, Any]:
-        """Call an OpenAI-compatible chat completions endpoint without LiteLLM."""
+        """Call an OpenAI-compatible endpoint without LiteLLM.
+
+        Handles OpenCode Go specifics automatically: session/User-Agent
+        headers and models that only speak the Responses API protocol.
+        """
         base_url = (model_config.get("base_url") or "").rstrip("/")
         payload: Dict[str, Any] = {
             "model": model_config.get("model"),
@@ -276,18 +369,43 @@ class LLMService:
         # simple and enforce JSON in prompts/parsing instead.
         payload.pop("response_format", None)
         headers["Accept-Encoding"] = "identity"
+        # 思考强度：仅推理系模型注入；Responses 协议映射到 reasoning.effort
+        reasoning_effort = payload.pop("reasoning_effort", None)
+        if reasoning_effort and not self._model_supports_reasoning_effort(payload.get("model")):
+            reasoning_effort = None
         api_key = model_config.get("api_key") or "local-dev-key"
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
 
-        async with httpx.AsyncClient(timeout=timeout or self.timeout) as client:
-            response = await client.post(
-                f"{base_url}/chat/completions",
-                headers=headers,
-                json=payload,
+        use_responses = opencode_compat.needs_responses_api(payload.get("model"))
+        if opencode_compat.is_opencode_go(base_url):
+            # Stable per-process session id; callers may pass a finer-grained one.
+            headers.update(
+                opencode_compat.build_opencode_headers(session_id or self._opencode_session_id)
             )
+
+        if use_responses:
+            url = f"{base_url}/responses"
+            payload = opencode_compat.build_responses_payload(
+                model=payload["model"],
+                messages=payload["messages"],
+                temperature=payload.get("temperature"),
+                max_tokens=payload.get("max_tokens"),
+                top_p=payload.get("top_p"),
+                reasoning_effort=reasoning_effort,
+            )
+        else:
+            url = f"{base_url}/chat/completions"
+            if reasoning_effort:
+                payload["reasoning_effort"] = reasoning_effort
+
+        # trust_env=False：绕过系统代理。长补全请求经本地代理会偶发 ReadTimeout，
+        # 而直连 OpenAI 兼容网关已验证稳定。
+        async with httpx.AsyncClient(timeout=timeout or self.timeout, trust_env=False) as client:
+            response = await client.post(url, headers=headers, json=payload)
             response.raise_for_status()
-            return response.json()
+            data = response.json()
+            return opencode_compat.normalize_responses_payload(data) if use_responses else data
 
     @staticmethod
     def _message_content(response: Any) -> str:
@@ -381,6 +499,8 @@ class LLMService:
         """
         model = self._resolve_model(iq_level, model=model, model_config=model_config)
         completion_model = self._get_completion_model(model)
+        import time as _time
+        _started = _time.perf_counter()
 
         messages = [{"role": "system", "content": system_prompt}]
         if conversation_history:
@@ -398,12 +518,17 @@ class LLMService:
 
                 response_format = {"type": "json_object"} if any(token in completion_model.lower() for token in ["gpt", "qwen", "glm"]) else None
                 if self._should_use_openai_compatible_http(model_config):
+                    # glm/深度思考类模型的推理部分需要预留 token，
+                    # 但上限过高会让思考无节制拖慢发言节奏，3000 足够覆盖
+                    # thought(500) + speech(220) + 思考开销
                     response = await self._acompletion_openai_compatible(
                         model_config=model_config or {},
                         messages=messages,
                         temperature=temperature,
+                        max_tokens=3000,
                         response_format=response_format,
                         timeout=self.timeout,
+                        session_id=session_id,
                     )
                 else:
                     response = await acompletion(
@@ -416,16 +541,16 @@ class LLMService:
                     )
 
                 self._log_usage(response, model, session_id)
-                
+
                 if not response:
                     raise ValueError("Empty response from LLM")
 
                 content = self._message_content(response)
                 if not content:
                     raise ValueError("Empty content in LLM response")
-                
+
                 logger.debug(f"LLM raw response (first 200 chars): {content[:200]}")
-                
+
                 # Try to parse JSON
                 try:
                     data = json.loads(content)
@@ -435,11 +560,13 @@ class LLMService:
                     data = self._extract_json_from_text(content)
                     if data is None:
                         raise ValueError(f"Could not extract valid JSON from response. Content: {content[:200]}")
-                
+
                 # Validate with Pydantic
                 validated = AgentResponse(**data)
-                
-                logger.info(f"Successfully generated agent response: {validated.speech[:50]}...")
+
+                logger.info(
+                    f"Successfully generated agent response in {_time.perf_counter() - _started:.1f}s: {validated.speech[:50]}..."
+                )
                 return validated
                 
             except Exception as e:
@@ -454,6 +581,82 @@ class LLMService:
         fallback_data = self._create_fallback_response("Max retries exceeded", iq_level)
         return AgentResponse(**fallback_data)
     
+    async def generate_chat_response(
+        self,
+        system_prompt: str,
+        conversation_history: list,
+        iq_level: str,
+        temperature: float = 0.9,
+        model: Optional[str] = None,
+        model_config: Optional[Dict[str, Any]] = None,
+        session_id: Optional[str] = None,
+    ) -> ChatResponse:
+        """Generate a group-chat style response (multiple short bubbles)."""
+        model = self._resolve_model(iq_level, model=model, model_config=model_config)
+        completion_model = self._get_completion_model(model)
+        import time as _time
+        _started = _time.perf_counter()
+
+        messages = [{"role": "system", "content": system_prompt}]
+        if conversation_history:
+            messages.extend(conversation_history)
+        else:
+            messages.append({"role": "user", "content": "请根据以上规则开始本轮群聊发言，并只输出 JSON。"})
+
+        for attempt in range(self.max_retries):
+            try:
+                llm_params = self._get_llm_params(model, model_config=model_config)
+                self._ensure_api_key(model, llm_params)
+
+                if self._should_use_openai_compatible_http(model_config):
+                    response = await self._acompletion_openai_compatible(
+                        model_config=model_config or {},
+                        messages=messages,
+                        temperature=temperature,
+                        max_tokens=2000,
+                        timeout=self.timeout,
+                        session_id=session_id,
+                    )
+                else:
+                    response = await acompletion(
+                        model=completion_model,
+                        messages=messages,
+                        temperature=temperature,
+                        timeout=self.timeout,
+                        **llm_params
+                    )
+
+                self._log_usage(response, model, session_id)
+
+                if not response:
+                    raise ValueError("Empty response from LLM")
+
+                content = self._message_content(response)
+                if not content:
+                    raise ValueError("Empty content in LLM response")
+
+                try:
+                    data = json.loads(content)
+                except json.JSONDecodeError:
+                    data = self._extract_json_from_text(content)
+                    if data is None:
+                        raise ValueError(f"Could not extract valid JSON from response. Content: {content[:200]}")
+
+                validated = ChatResponse(**data)
+                if not validated.messages:
+                    raise ValueError("Chat response contains no messages")
+                logger.info(
+                    f"Generated chat response in {_time.perf_counter() - _started:.1f}s: {len(validated.messages)} bubbles"
+                )
+                return validated
+
+            except Exception as e:
+                logger.error(f"Chat LLM call failed (attempt {attempt + 1}/{self.max_retries}): {type(e).__name__}: {e}")
+                if attempt == self.max_retries - 1:
+                    return ChatResponse(thought="思考中...", messages=["……"], suspicion={})
+
+        return ChatResponse(thought="思考中...", messages=["……"], suspicion={})
+
     async def generate_vote_response(
         self,
         system_prompt: str,
@@ -511,6 +714,7 @@ class LLMService:
                         temperature=temperature,
                         response_format=response_format,
                         timeout=self.timeout,
+                        session_id=session_id,
                     )
                 else:
                     response = await acompletion(
@@ -570,20 +774,23 @@ class LLMService:
         mbti_type: str,
         iq_level: str,
         session_id: Optional[str] = None,
-    ) -> str:
+        model_config: Optional[Dict[str, Any]] = None,
+    ) -> Optional[str]:
         """
         Generate a personalized name for an agent based on their characteristics.
-        
+
         Args:
             mbti_type: MBTI personality type (e.g., "ENTJ", "INFP")
             iq_level: IQ level (High/Mid/Low)
-            
+            model_config: Optional per-agent model configuration dict
+
         Returns:
-            Generated name string (e.g., "一意孤行的小笨仙女")
+            Generated name string (e.g., "一意孤行的小笨仙女")；None 表示生成失败，
+            调用方应保留角色库兜底名，而不是退化到旧命名。
         """
-        # Use a simple model for name generation (Mid IQ model is usually cheaper)
-        model = self._get_model_for_iq("Mid")
-        llm_params = self._get_llm_params(model)
+        model = self._resolve_model("Mid", model_config=model_config)
+        completion_model = self._get_completion_model(model)
+        llm_params = self._get_llm_params(model, model_config=model_config)
         self._ensure_api_key(model, llm_params)
         
         # MBTI 性格特征描述
@@ -614,52 +821,164 @@ class LLMService:
         
         mbti_desc = mbti_descriptions.get(mbti_type, "性格独特")
         iq_desc = iq_descriptions.get(iq_level, "普通")
-        
-        prompt = f"""请为这个角色生成一个个性化的中文昵称。
 
-角色特征：
-- MBTI 类型：{mbti_type} ({mbti_desc})
-- 智商水平：{iq_level} ({iq_desc})
-
-要求：
-1. 昵称应该体现角色的性格特征和智商水平
-2. 格式类似："一意孤行的小笨仙女"、"理性果断的小王子"、"温柔体贴的小甜心"
-3. 昵称应该有趣、有个性，符合角色的性格
-4. 只返回昵称，不要其他解释
-5. 昵称长度在 6-12 个汉字之间
-
-请直接返回昵称，不要加引号或其他符号："""
+        prompt = prompt_registry.render("werewolf_naming_prompt", {
+            "mbti_type": mbti_type,
+            "mbti_desc": mbti_desc,
+            "iq_level": iq_level,
+            "iq_desc": iq_desc,
+        })
 
         try:
-            response = await acompletion(
-                model=model,
-                messages=[
-                    {"role": "system", "content": "你是一个擅长为角色起名的创意助手。请根据角色特征生成有趣、个性化的中文昵称。"},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.8,
-                max_tokens=20,
-                timeout=self.timeout,
-                **llm_params
-            )
-            
-            name = response.choices[0].message.content.strip()
+            if self._should_use_openai_compatible_http(model_config):
+                response = await self._acompletion_openai_compatible(
+                    model_config=model_config or {},
+                    messages=[
+                        {"role": "system", "content": "你是一个擅长为角色起名的创意助手。请根据角色特征生成有趣、个性化的中文昵称。"},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.8,
+                    max_tokens=20,
+                    timeout=self.timeout,
+                    session_id=session_id,
+                )
+            else:
+                response = await acompletion(
+                    model=completion_model,
+                    messages=[
+                        {"role": "system", "content": "你是一个擅长为角色起名的创意助手。请根据角色特征生成有趣、个性化的中文昵称。"},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.8,
+                    max_tokens=20,
+                    timeout=self.timeout,
+                    **llm_params
+                )
+
+            name = (self._message_content(response) or "").strip()
             self._log_usage(response, model, session_id)
             # 清理可能的引号或多余字符
             name = name.strip('"\'，。！？\n')
-            
-            # 验证长度
-            if len(name) < 4 or len(name) > 15:
-                logger.warning(f"Generated name '{name}' length invalid, using fallback")
-                return self._generate_fallback_name(mbti_type, iq_level)
-            
+
+            # 验证长度：2-15 字；不合格时返回 None 让调用方保留角色库兜底名，
+            # 而不是退化到「普通的小王子」式的旧命名
+            if len(name) < 2 or len(name) > 15:
+                logger.warning(f"Generated name '{name}' length invalid, keeping fallback name")
+                return None
+
             logger.info(f"Generated agent name: {name} for {mbti_type} {iq_level}")
             return name
-            
+
         except Exception as e:
-            logger.error(f"Failed to generate agent name: {e}, using fallback")
-            return self._generate_fallback_name(mbti_type, iq_level)
+            logger.error(f"Failed to generate agent name: {e}, keeping fallback name")
+            return None
     
+    async def generate_themed_roster(
+        self,
+        work: str,
+        count: int,
+        session_id: Optional[str] = None,
+        model_config: Optional[Dict[str, Any]] = None,
+    ) -> list[Dict[str, str]]:
+        """按指定作品一次性生成一整套角色（name + mbti + gender 绑定）。
+
+        用于狼人杀「主题角色阵容」：一次 LLM 调用产出全部玩家，
+        保证同一局内角色名来自同一作品世界观、MBTI 分布分散。
+        """
+        work = (work or "").strip()
+        if not work:
+            raise ValueError("作品名不能为空")
+        if not 6 <= int(count) <= 12:
+            raise ValueError("角色数量需在 6-12 之间")
+
+        prompt = prompt_registry.render("werewolf_roster_prompt", {"work": work, "count": count})
+
+        if self._should_use_openai_compatible_http(model_config):
+            response = await self._acompletion_openai_compatible(
+                model_config=model_config or {},
+                messages=[
+                    {"role": "system", "content": "你是狼人杀角色设计师，只输出 JSON。"},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.7,
+                max_tokens=800,
+                timeout=self.timeout,
+                session_id=session_id,
+            )
+        else:
+            model = self._resolve_model("Mid", model_config=model_config)
+            completion_model = self._get_completion_model(model)
+            llm_params = self._get_llm_params(model, model_config=model_config)
+            self._ensure_api_key(model, llm_params)
+            response = await acompletion(
+                model=completion_model,
+                messages=[
+                    {"role": "system", "content": "你是狼人杀角色设计师，只输出 JSON。"},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.7,
+                max_tokens=800,
+                timeout=self.timeout,
+                **llm_params,
+            )
+        self._log_usage(response, "roster", session_id)
+
+        text = self._message_content(response) or ""
+        data = self._extract_roster_json(text)
+        if not isinstance(data, list):
+            raise ValueError("模型未返回有效的角色数组")
+
+        valid_mbti = {
+            "ENTJ", "INFP", "ISTP", "ENFJ", "INTP", "ESTJ", "ISFP", "ENTP",
+            "ISFJ", "ESFP", "INTJ", "ESFJ", "ESTP", "INFJ", "ENFP", "ISTJ",
+        }
+        roster: list[Dict[str, str]] = []
+        seen: set[str] = set()
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "").strip()
+            mbti = str(item.get("mbti") or "").strip().upper()
+            gender = str(item.get("gender") or "").strip()
+            if not (2 <= len(name) <= 8) or name in seen:
+                continue
+            if mbti not in valid_mbti:
+                continue
+            gender = "女" if "女" in gender else "男"
+            seen.add(name)
+            roster.append({"name": name, "mbti": mbti, "gender": gender})
+
+        if len(roster) < int(count):
+            raise ValueError(f"模型只生成了 {len(roster)} 个有效角色（需要 {count}），请重试")
+        return roster[: int(count)]
+
+    def _extract_roster_json(self, text: str) -> Optional[Any]:
+        """从模型输出里提取 JSON（兼容数组与 {"roles": [...]} 两种形状）。"""
+        if "```json" in text:
+            start = text.find("```json") + 7
+            end = text.find("```", start)
+            if end != -1:
+                text = text[start:end].strip()
+        elif "```" in text:
+            start = text.find("```") + 3
+            end = text.find("```", start)
+            if end != -1:
+                text = text[start:end].strip()
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+        start_idx, end_idx = text.find("["), text.rfind("]")
+        if start_idx != -1 and end_idx > start_idx:
+            try:
+                return json.loads(text[start_idx : end_idx + 1])
+            except json.JSONDecodeError:
+                pass
+        obj = self._extract_json_from_text(text)
+        if isinstance(obj, dict) and isinstance(obj.get("roles"), list):
+            return obj["roles"]
+        return None
+
     def _generate_fallback_name(self, mbti_type: str, iq_level: str) -> str:
         """Generate a fallback name when LLM fails."""
         # 简单的规则生成
@@ -714,6 +1033,7 @@ class LLMService:
                 max_tokens=max_tokens,
                 response_format=response_format,
                 timeout=self.timeout,
+                session_id=session_id,
                 **extra_params,
             )
         else:

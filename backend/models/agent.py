@@ -35,6 +35,7 @@ from services.memory_service import AgentMemorySystem
 if TYPE_CHECKING:
     from services.llm_service import LLMService
 from config.settings import settings
+from utils.opencode_compat import is_opencode_go
 
 
 class IQLevel(str, Enum):
@@ -111,9 +112,7 @@ class Agent:
         self.model_config = model_config  # 保存自定义模型配置
         self.runtime_context = runtime_context
         if llm_service is None:
-            from services.llm_service import LLMService
-
-            llm_service = LLMService()
+            llm_service = self._create_default_llm_backend()
         self.llm_service = llm_service
         
         self.is_alive = True
@@ -122,14 +121,43 @@ class Agent:
         self.vote_history: list = []
         self.created_at = datetime.now()
         
-        # Create CrewAI agent runtime when the package is available.
-        self._agent_runtime = self._create_crewai_agent()
+        # 智能体执行框架：默认 AgentScope（ReActAgent + 原生上下文压缩 + MsgHub）。
+        # 设 KILLER_AGENT_FRAMEWORK=crewai 可临时回退旧 CrewAI 运行时。
+        self._agent_runtime = None
+        if os.environ.get("KILLER_AGENT_FRAMEWORK", "agentscope").lower() == "crewai":
+            self._agent_runtime = self._create_crewai_agent()
         
         if self._agent_runtime is None:
-            logger.warning(
-                "CrewAI runtime not available for %s; continuing with LiteLLM-only flow.",
+            logger.debug(
+                "Agent %s runs on the default llm backend (%s).",
                 self.config.id,
+                type(self.llm_service).__name__,
             )
+
+    def _create_default_llm_backend(self):
+        """默认执行后端：优先 AgentScope 运行时，不可用时回退 LiteLLM 直连。"""
+        try:
+            from services.agentscope_runtime import (  # noqa: PLC0415 延迟导入避免环
+                AgentscopeRuntime,
+                is_agentscope_available,
+            )
+
+            provider = ((self.model_config or {}).get("provider") or "openai").lower()
+            base_url = (self.model_config or {}).get("base_url")
+            # AgentScope 运行时已支持 OpenCode Go 网关（自动注入 x-opencode-session 头）；
+            # 仅 Responses 协议的模型（luna/grok/muse 系列）在 build_agentscope_model 中显式报错。
+            if is_agentscope_available():
+                logger.info("Agent %s uses AgentScope runtime.", self.config.id)
+                return AgentscopeRuntime(model_config=self.model_config)
+        except Exception:
+            logger.warning(
+                "AgentScope runtime unavailable for %s; falling back to LiteLLM.",
+                self.config.id,
+                exc_info=True,
+            )
+        from services.llm_service import LLMService
+
+        return LLMService()
     
     def _resolve_runtime_model_config(self) -> tuple[str, str, str, Optional[str]]:
         """Resolve provider, model name, API key, and base URL for the agent runtime."""
@@ -173,6 +201,17 @@ class Agent:
                 return None
 
             provider, model_name, api_key, base_url = self._resolve_runtime_model_config()
+
+            # OpenCode Go 网关要求 x-opencode-session 会话头与自定义 User-Agent，
+            # 且 luna 系列模型仅支持 Responses 协议——litellm/CrewAI 无法透传这些要求，
+            # 因此 OpenCode 配置一律绕过 CrewAI 运行时，走 llm_service 的直连适配层。
+            if provider == "opencode" or is_opencode_go(base_url):
+                logger.info(
+                    "Agent %s uses OpenCode Go gateway; bypassing CrewAI runtime for direct OpenAI-compatible calls.",
+                    self.config.id,
+                )
+                return None
+
             llm_model = model_name if provider == "openai" else f"{provider}/{model_name}"
 
             logger.info("Creating CrewAI agent %s:", self.config.id)
@@ -401,8 +440,14 @@ class Agent:
             logger.warning(f"JSON decode error: {e}, text: {text[:200]}")
             return None
     
-    def _format_conversation_history_for_llm(self, conversation_history: list) -> list:
-        """Convert conversation history to LiteLLM message format."""
+    def _format_conversation_history_for_llm(
+        self, conversation_history: list, merge_consecutive: Optional[bool] = None
+    ) -> list:
+        """Convert conversation history to LiteLLM message format.
+
+        merge_consecutive=None 时按后端能力自动决定：AgentScope 常驻会话需要
+        逐条历史做内容哈希去重（与 MsgHub 广播幂等），不合并连续 user 消息。
+        """
         formatted_messages = []
         for msg in conversation_history:
             if not isinstance(msg, dict):
@@ -426,20 +471,25 @@ class Agent:
                     content = f"{agent_id}: {content}"
             formatted_messages.append({"role": role, "content": content})
 
-        merged_messages = []
-        for message in formatted_messages:
-            if (
-                merged_messages
-                and merged_messages[-1]["role"] == message["role"]
-                and message["role"] == "user"
-            ):
-                merged_messages[-1]["content"] = (
-                    f"{merged_messages[-1]['content']}\n{message['content']}"
-                )
-            else:
-                merged_messages.append(message)
+        should_merge = merge_consecutive
+        if should_merge is None:
+            should_merge = not getattr(self.llm_service, "prefers_unmerged_history", False)
+        if should_merge:
+            merged_messages = []
+            for message in formatted_messages:
+                if (
+                    merged_messages
+                    and merged_messages[-1]["role"] == message["role"]
+                    and message["role"] == "user"
+                ):
+                    merged_messages[-1]["content"] = (
+                        f"{merged_messages[-1]['content']}\n{message['content']}"
+                    )
+                else:
+                    merged_messages.append(message)
+            return merged_messages
 
-        return merged_messages
+        return formatted_messages
     
     async def generate_description(
         self,
@@ -468,11 +518,15 @@ class Agent:
         # Get memory context
         memory_context = self.memory_system.get_conversation_context(current_round)
 
-        # Build full prompt with memory context
-        full_prompt = f"{system_prompt}\n\n## 你的记忆:\n{memory_context}"
+        # 记忆作为对话末尾的 user 消息注入（不再拼进 system prompt），
+        # 保持 system 前缀逐局稳定，便于网关侧的提示词前缀缓存命中
+        full_prompt = system_prompt
 
         # Format conversation history for LiteLLM
-        formatted_messages = self._format_conversation_history_for_llm(conversation_history)
+        history_messages = list(conversation_history)
+        if memory_context:
+            history_messages.append({"role": "user", "content": f"## 你的记忆:\n{memory_context}"})
+        formatted_messages = self._format_conversation_history_for_llm(history_messages)
 
         try:
             if self._agent_runtime is not None:
@@ -491,6 +545,7 @@ class Agent:
                     iq_level=self.config.iq_level.value,
                     temperature=0.8,
                     model_config=self.model_config,
+                    session_id=self.config.id,
                 )
                 response_data = response.dict()
         except Exception as e:
@@ -517,6 +572,57 @@ class Agent:
 
         return response_data
     
+    async def generate_chat_messages(
+        self,
+        system_prompt: str,
+        conversation_history: list,
+        current_round: int
+    ) -> Dict[str, Any]:
+        """Generate a group-chat style turn (multiple short bubbles).
+
+        Returns:
+            Dict with thought, messages (list of short bubbles) and suspicion
+        """
+        if self.is_possessed:
+            raise ValueError("Cannot generate chat messages for possessed agent")
+
+        self.memory_system.apply_memory_decay(current_round)
+        memory_context = self.memory_system.get_conversation_context(current_round)
+        # 记忆作为对话末尾的 user 消息注入（保持 system 前缀稳定，利用前缀缓存）
+        history_messages = list(conversation_history)
+        if memory_context:
+            history_messages.append({"role": "user", "content": f"## 你的记忆:\n{memory_context}"})
+        formatted_messages = self._format_conversation_history_for_llm(history_messages)
+
+        try:
+            response = await self.llm_service.generate_chat_response(
+                system_prompt=system_prompt,
+                conversation_history=formatted_messages,
+                iq_level=self.config.iq_level.value,
+                temperature=0.9,
+                model_config=self.model_config,
+                session_id=self.config.id,
+            )
+            response_data = response.model_dump()
+        except Exception as e:
+            logger.error(f"Agent {self.config.id} failed to generate chat messages: {e}")
+            response_data = {
+                "thought": "思考中...",
+                "messages": ["……"],
+                "suspicion": {},
+            }
+
+        if "suspicion" in response_data:
+            self.suspicion_scores.update(response_data.get("suspicion", {}))
+
+        bubbles = [b for b in (response_data.get("messages") or []) if b] or ["……"]
+        response_data["messages"] = bubbles
+        response_data.setdefault("thought", "思考中...")
+        response_data.setdefault("suspicion", {})
+
+        self.memory_system.add_memory(f"我说: {' / '.join(bubbles)}", current_round)
+        return response_data
+
     async def generate_vote(
         self,
         system_prompt: str,
@@ -542,10 +648,15 @@ class Agent:
 
         # Get memory context
         memory_context = self.memory_system.get_conversation_context(current_round)
-        full_prompt = f"{system_prompt}\n\n## 你的记忆:\n{memory_context}"
+
+        # 记忆作为对话末尾的 user 消息注入（保持 system 前缀稳定，利用前缀缓存）
+        full_prompt = system_prompt
 
         # Format conversation history for LiteLLM
-        formatted_messages = self._format_conversation_history_for_llm(conversation_history)
+        history_messages = list(conversation_history)
+        if memory_context:
+            history_messages.append({"role": "user", "content": f"## 你的记忆:\n{memory_context}"})
+        formatted_messages = self._format_conversation_history_for_llm(history_messages)
 
         try:
             if self._agent_runtime is not None:
@@ -565,6 +676,7 @@ class Agent:
                     valid_agent_ids=valid_agent_ids,
                     temperature=0.7,
                     model_config=self.model_config,
+                    session_id=self.config.id,
                 )
                 response_data = response.dict()
             response_data["used_llm"] = True

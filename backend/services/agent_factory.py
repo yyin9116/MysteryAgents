@@ -80,10 +80,10 @@ class AgentFactory:
     def _generate_name(self, mbti_type: str) -> str:
         """
         为 agent 生成一个唯一的名字
-        
+
         Args:
             mbti_type: MBTI 性格类型
-            
+
         Returns:
             生成的名字
         """
@@ -101,21 +101,26 @@ class AgentFactory:
 
         # 获取该 MBTI 类型的名字列表
         names = self.NAMES_BY_PERSONALITY.get(mbti_type.upper(), [])
-        
-        # 如果没有预定义名字，使用通用名字
-        if not names:
-            names = ["小明", "小红", "小刚", "小丽", "小华", "小强", "小芳", "小军"]
-        
-        # 找一个未使用的名字
+
+        # 找一个未使用的名字；本 MBTI 池耗尽时跨 MBTI 取用知名角色，
+        # 绝不退化到「小明/小红」式的占位名
         available_names = [name for name in names if name not in self.used_names]
-        
-        # 如果所有名字都用完了，添加数字后缀
         if not available_names:
-            name = f"{names[0]}{self.agent_counter}"
+            available_names = [
+                name
+                for pool in self.NAMES_BY_PERSONALITY.values()
+                for name in pool
+                if name not in self.used_names
+            ]
+        if not available_names:
+            # 全池耗尽：知名角色加序号，而不是换成人名占位符
+            import random
+            base_pool = [name for pool in self.NAMES_BY_PERSONALITY.values() for name in pool]
+            name = f"{random.choice(base_pool)}·{self.agent_counter + 2}"
         else:
             import random
             name = random.choice(available_names)
-        
+
         self.used_names.add(name)
         return name
     

@@ -71,7 +71,7 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = 'INFO'
 
     LITELLM_LOG: str = 'INFO'
-    LLM_TIMEOUT: int = 30
+    LLM_TIMEOUT: int = 90
     LLM_MAX_RETRIES: int = 3
 
     MAX_RETRY_ATTEMPTS: int = 3
