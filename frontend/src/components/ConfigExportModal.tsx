@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Download, Upload, FileJson, FileText, X, AlertCircle, CheckCircle } from 'lucide-react';
+import { Download, Upload, FileJson, FileText, X, AlertCircle, CheckCircle, AlertTriangle } from 'lucide-react';
 import { configService } from '../services/configService';
 import type { GameConfigExport, ValidationResult } from '../services/configService';
 
@@ -313,7 +313,7 @@ const ConfigExportModal: React.FC<ConfigExportModalProps> = ({
                                         {validation.warnings.length > 0 && (
                                             <div className="space-y-1 text-sm mt-2">
                                                 {validation.warnings.map((warning, i) => (
-                                                    <div key={i} className="text-yellow-400">⚠ {warning}</div>
+                                                    <div key={i} className="flex items-center gap-1 text-yellow-400"><AlertTriangle size={12} />{warning}</div>
                                                 ))}
                                             </div>
                                         )}
@@ -325,7 +325,7 @@ const ConfigExportModal: React.FC<ConfigExportModalProps> = ({
                                         <h4 className="font-medium mb-2">配置预览</h4>
                                         <div className="space-y-1 text-sm text-text-muted">
                                             <div>名称: {importedConfig.name}</div>
-                                            <div>Agent数量: {importedConfig.agent_count}</div>
+                                            <div>玩家数量: {importedConfig.agent_count}</div>
                                             <div>平民词: {importedConfig.civilian_word}</div>
                                             <div>卧底词: {importedConfig.undercover_word}</div>
                                             <div>最大回合: {importedConfig.max_rounds}</div>
