@@ -1,6 +1,7 @@
-import { Ghost, Settings, SlidersHorizontal } from 'lucide-react';
+import { Ghost, Settings, SlidersHorizontal, ScrollText } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useI18n } from '../hooks/useI18n';
+import { ThemeToggle } from './ThemeToggle';
 
 interface LayoutProps {
     children: React.ReactNode;
@@ -26,12 +27,20 @@ const Layout: React.FC<LayoutProps> = ({ children, wide = false }) => {
                         </div>
                     </Link>
                     <nav className="flex items-center space-x-4">
+                        <ThemeToggle />
+                        <Link
+                            to="/prompts"
+                            className="hidden sm:flex items-center gap-2 px-4 py-2 rounded-full border border-white/10 text-sm text-text-muted hover:text-primary hover:border-primary/40 hover:bg-white/5 transition-all"
+                        >
+                            <ScrollText className="w-4 h-4" />
+                            {t.nav.prompts}
+                        </Link>
                         <Link
                             to="/settings"
                             className="hidden sm:flex items-center gap-2 px-4 py-2 rounded-full border border-white/10 text-sm text-text-muted hover:text-primary hover:border-primary/40 hover:bg-white/5 transition-all"
                         >
                             <SlidersHorizontal className="w-4 h-4" />
-                            Model Configs
+                            {t.nav.modelConfigs}
                         </Link>
                         <Link
                             to="/settings"
@@ -48,7 +57,7 @@ const Layout: React.FC<LayoutProps> = ({ children, wide = false }) => {
             </main>
 
             <footer className="py-8 px-6 border-t border-white/5 text-center text-sm text-text-muted">
-                &copy; 2025 {t.app.title}. Powered by Advanced Agentic Coding.
+                &copy; {new Date().getFullYear()} {t.app.title}. {t.app.footer}
             </footer>
         </div>
     );

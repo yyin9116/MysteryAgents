@@ -1,0 +1,102 @@
+/* ============================================================
+   夜幕协议 · Noir HUD 设计令牌
+   由 Ardot 设计系统导出（Variables 集合 Colors，Night/Day 双模式）
+   Night 为默认主题；在 <html> 上设置 data-theme="day" 切换昼模式
+   ============================================================ */
+
+/* ---------- 自托管字体（public/fonts，避免外网 CDN 依赖） ---------- */
+@font-face {
+  font-family: "Orbitron";
+  src: url("/fonts/orbitron-latin-700-normal.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Share Tech Mono";
+  src: url("/fonts/share-tech-mono-latin-400-normal.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  /* 动效令牌（昼夜通用常量，对齐设计系统「等待与转场」规范） */
+  --ds-duration-instant: 120ms;
+  --ds-duration-fast: 200ms;
+  --ds-duration-flow: 400ms;
+  --ds-duration-ambient: 2400ms;
+  --ds-ease-entrance: cubic-bezier(0.16, 1, 0.3, 1);
+  --ds-ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* 背景层 */
+  --ds-bg-base: #0d0a14;
+  --ds-bg-surface: #171424;
+
+  /* 边框 */
+  --ds-border-subtle: rgba(255, 255, 255, 0.1);
+  --ds-border-strong: rgba(255, 255, 255, 0.22);
+
+  /* 强调色 */
+  --ds-accent-gold: #e8c269;
+  --ds-accent-violet: #8c7df5;
+
+  /* 语义状态 */
+  --ds-success: #7dd9a6;
+  --ds-warning: #e8c269;
+  --ds-error: #e06b6b;
+  --ds-info: #5c8cf0;
+
+  /* 角色语义色（昼夜通用，保证身份识别稳定） */
+  --ds-role-wolf: #e85c5c;
+  --ds-role-seer: #8c7df5;
+  --ds-role-witch: #4fccc4;
+  --ds-role-guard: #5c8cf0;
+  --ds-role-civilian: #b8b5c7;
+  --ds-role-undercover: #f0a159;
+
+  /* 文本 */
+  --ds-text-primary: #f2f2f7;
+  --ds-text-secondary: #a8a6b8;
+
+  /* 字体（外部字体可后续自托管，当前回退系统字体） */
+  --ds-font-display: "Orbitron", "SF Pro Display", "PingFang SC", sans-serif;
+  --ds-font-hud: "Share Tech Mono", "SF Mono", ui-monospace, monospace;
+
+  /* 形状与节奏 */
+  --ds-radius-card: 16px;
+  --ds-radius-control: 12px;
+  --ds-radius-chip: 10px;
+  --ds-space-unit: 8px;
+
+  /* 间距节奏（--ds-space-unit 的组合令牌，昼夜通用） */
+  --ds-space-inline: 8px;         /* 行内元素：按钮组 / 徽章 gap */
+  --ds-space-stack: 12px;         /* 卡片内纵向：标题与内容、说明与控件 */
+  --ds-space-card: 16px;          /* 区块卡片内边距 */
+  --ds-space-section-gap: 24px;   /* 配置页区块卡片之间的纵向间距 */
+  --ds-space-panel: 24px;         /* 面板 / 大卡内边距 */
+  --ds-space-bubble: 6px;         /* 群聊气泡：同一发言人气泡组内间距 */
+  --ds-space-bubble-loose: 12px;  /* 群聊气泡：不同发言人气泡间距 */
+}
+
+/* ---------- 昼模式 ---------- */
+[data-theme="day"] {
+  --ds-bg-base: #f5f2ed;
+  --ds-bg-surface: #ffffff;
+  --ds-border-subtle: rgba(15, 20, 26, 0.12);
+  --ds-border-strong: rgba(15, 20, 26, 0.25);
+  --ds-accent-gold: #bf8c29;
+  --ds-accent-violet: #7363f5;
+  --ds-success: #61c78c;
+  --ds-warning: #bf8c29;
+  --ds-error: #e05c52;
+  --ds-role-wolf: #d93345;
+  --ds-role-seer: #7363f5;
+  --ds-role-witch: #4fccc4;
+  --ds-role-guard: #5c8cf0;
+  --ds-role-civilian: #a8adb8;
+  --ds-role-undercover: #f09640;
+  --ds-text-primary: #1a1c21;
+  --ds-text-secondary: #666b73;
+}

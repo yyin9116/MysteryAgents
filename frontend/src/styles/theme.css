@@ -1,21 +1,21 @@
 :root {
-  /* Core Colors */
-  --primary: #6366f1;
-  --primary-hover: #4f46e5;
-  --secondary: #ec4899;
-  --accent: #8b5cf6;
-  
+  /* Core Colors —— 已接入「夜幕协议」Noir HUD 设计令牌（styles/design-tokens.css） */
+  --primary: var(--ds-accent-violet);
+  --primary-hover: #6f5fe5;
+  --secondary: var(--ds-accent-gold);
+  --accent: var(--ds-accent-gold);
+
   /* Neutral Palette */
-  --bg-main: #0f172a;
-  --bg-card: rgba(30, 41, 59, 0.7);
-  --bg-glass: rgba(255, 255, 255, 0.05);
-  --border-glass: rgba(255, 255, 255, 0.1);
-  
+  --bg-main: var(--ds-bg-base);
+  --bg-card: var(--ds-bg-surface);
+  --bg-glass: rgba(255, 255, 255, 0.04);
+  --border-glass: var(--ds-border-subtle);
+
   /* Text Colors */
-  --text-bright: #f8fafc;
-  --text-normal: #e2e8f0;
-  --text-muted: #94a3b8;
-  --text-dark: #64748b;
+  --text-bright: var(--ds-text-primary);
+  --text-normal: var(--ds-text-primary);
+  --text-muted: var(--ds-text-secondary);
+  --text-dark: var(--ds-text-secondary);
 
   /* Effects */
   --shadow-glass: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
@@ -23,7 +23,10 @@
   --radius-xl: 1.5rem;
 }
 
-/* Dark theme overrides if needed */
-[data-theme='dark'] {
-  --bg-main: #020617;
+/* 昼模式：跟随设计系统 Day 令牌（html data-theme="day"） */
+[data-theme='day'] {
+  --bg-main: var(--ds-bg-base);
+  --bg-card: var(--ds-bg-surface);
+  --border-glass: var(--ds-border-subtle);
+  --bg-glass: rgba(15, 20, 26, 0.03);
 }

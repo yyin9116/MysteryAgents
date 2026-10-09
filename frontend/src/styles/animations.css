@@ -154,3 +154,126 @@
 .animate-seat-focus {
   animation: seat-focus 2.4s ease-in-out infinite;
 }
+
+/* ============================================================
+   等待与转场动效（对齐设计系统「界面-等待与转场动效」画板）
+   ============================================================ */
+
+/* 起名骨架：席位逐位点亮（入场一次） */
+@keyframes seat-light-up {
+  0% { transform: scale(0.6) translateY(6px); opacity: 0; }
+  60% { transform: scale(1.06); opacity: 1; }
+  100% { transform: scale(1) translateY(0); opacity: 1; }
+}
+
+/* 起名骨架：名字条 shimmer 扫光 */
+@keyframes name-shimmer {
+  0% { background-position: -180% 0; }
+  100% { background-position: 180% 0; }
+}
+
+/* 灵光点：思考三点呼吸（错峰 150ms） */
+@keyframes thinking-dot {
+  0%, 100% { transform: scale(0.72); opacity: 0.3; }
+  45% { transform: scale(1.15); opacity: 0.95; }
+}
+
+/* 发言中：均衡器条 */
+@keyframes eq-bar {
+  0%, 100% { transform: scaleY(0.35); }
+  50% { transform: scaleY(1); }
+}
+
+/* 事件日志新条目：右滑入场（200ms entrance） */
+@keyframes log-slide-in {
+  0% { transform: translateX(24px); opacity: 0; }
+  100% { transform: translateX(0); opacity: 1; }
+}
+
+/* 事件日志新条目：金色高亮 1.6s 后淡出 */
+@keyframes log-flash {
+  0% { background-color: rgba(232, 194, 105, 0.14); border-color: rgba(232, 194, 105, 0.35); }
+  100% { background-color: transparent; border-color: transparent; }
+}
+
+/* 阶段切换：雾气横扫（600ms 一次） */
+@keyframes fog-sweep {
+  0% { transform: translateX(-120%) skewX(-12deg); opacity: 0; }
+  25% { opacity: 0.85; }
+  100% { transform: translateX(120%) skewX(-12deg); opacity: 0; }
+}
+
+/* 阶段胶囊 / 回合数：弹入（200ms） */
+@keyframes pill-pop {
+  0% { transform: scale(0.82); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* 开局步骤逐条浮现 */
+@keyframes step-in {
+  0% { transform: translateY(6px); opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+
+.anim-seat-in {
+  animation: seat-light-up var(--ds-duration-flow) var(--ds-ease-entrance) backwards;
+}
+
+.anim-name-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(232, 194, 105, 0.22) 0%,
+    rgba(232, 194, 105, 0.55) 50%,
+    rgba(232, 194, 105, 0.22) 100%
+  );
+  background-size: 180% 100%;
+  animation: name-shimmer 1.6s linear infinite;
+}
+
+.anim-name-shimmer-dim {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.06) 0%,
+    rgba(255, 255, 255, 0.14) 50%,
+    rgba(255, 255, 255, 0.06) 100%
+  );
+  background-size: 180% 100%;
+  animation: name-shimmer 1.6s linear infinite;
+}
+
+.anim-thinking-dot {
+  animation: thinking-dot 1.2s var(--ds-ease-standard) infinite;
+}
+
+.anim-eq-bar {
+  transform-origin: bottom;
+  animation: eq-bar 0.9s ease-in-out infinite;
+}
+
+.anim-log-in {
+  animation: log-slide-in var(--ds-duration-fast) var(--ds-ease-entrance) backwards;
+}
+
+.anim-log-flash {
+  animation: log-flash 1.6s var(--ds-ease-standard) backwards;
+}
+
+.anim-fog-sweep {
+  animation: fog-sweep 600ms var(--ds-ease-standard) forwards;
+}
+
+.anim-pill-pop {
+  animation: pill-pop var(--ds-duration-fast) var(--ds-ease-entrance) backwards;
+}
+
+.anim-step-in {
+  animation: step-in var(--ds-duration-flow) var(--ds-ease-entrance) backwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .anim-seat-in, .anim-name-shimmer, .anim-name-shimmer-dim, .anim-thinking-dot,
+  .anim-eq-bar, .anim-log-in, .anim-log-flash, .anim-fog-sweep,
+  .anim-pill-pop, .anim-step-in {
+    animation: none;
+  }
+}

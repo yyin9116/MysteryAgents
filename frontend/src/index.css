@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./styles/design-tokens.css";
 @import "./styles/theme.css";
 @import "./styles/animations.css";
 
@@ -18,6 +19,38 @@
   --color-ww-red: #ff4444;
   --color-ww-glow-gold: rgba(255, 215, 0, 0.5);
   --color-ww-glow-red: rgba(255, 68, 68, 0.5);
+
+  /* 夜幕协议 · Noir HUD（styles/design-tokens.css） */
+  --color-gold: var(--ds-accent-gold);
+  --color-violet: var(--ds-accent-violet);
+  --color-success: var(--ds-success);
+  --color-warning: var(--ds-warning);
+  --color-danger: var(--ds-error);
+  --color-info: var(--ds-info);
+  --color-line: var(--ds-border-subtle);
+  --color-line-strong: var(--ds-border-strong);
+  --color-role-wolf: var(--ds-role-wolf);
+  --color-role-seer: var(--ds-role-seer);
+  --color-role-witch: var(--ds-role-witch);
+  --color-role-guard: var(--ds-role-guard);
+  --color-role-civilian: var(--ds-role-civilian);
+  --color-role-undercover: var(--ds-role-undercover);
+  --color-surface: var(--ds-bg-surface);
+  --color-text-primary: var(--ds-text-primary);
+  --color-text-secondary: var(--ds-text-secondary);
+
+  /* 字体 */
+  --font-display: var(--ds-font-display);
+  --font-hud: var(--ds-font-hud);
+
+  /* 间距令牌（生成 p-/gap-/space-y-/mt- 等工具类，如 gap-section、p-card） */
+  --spacing-inline: var(--ds-space-inline);
+  --spacing-stack: var(--ds-space-stack);
+  --spacing-card: var(--ds-space-card);
+  --spacing-section: var(--ds-space-section-gap);
+  --spacing-panel: var(--ds-space-panel);
+  --spacing-bubble: var(--ds-space-bubble);
+  --spacing-bubble-loose: var(--ds-space-bubble-loose);
 }
 
 @layer base {
