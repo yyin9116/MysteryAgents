@@ -5,8 +5,8 @@ Discussion mode API endpoints.
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
-from typing import List, Dict, Optional
+from pydantic import BaseModel, Field
+from typing import Any, List, Dict, Optional
 import asyncio
 import json
 import logging
@@ -36,6 +36,11 @@ class CreateDiscussionRequest(BaseModel):
     use_characters: bool = False  # 是否使用角色系统
     # 模型配置 (新格式：统一的 llm_config 对象)
     llm_config: Optional[Dict[str, str]] = None
+    # 主题角色阵容（名字+MBTI+性别绑定），三游戏统一
+    roster: Optional[List[Dict[str, Any]]] = None
+    roster_work: Optional[str] = None
+    # 智能模型分配（按 IQ 分档）
+    auto_assign: Optional[Dict[str, Any]] = None
 
 
 class UserSpeakRequest(BaseModel):
@@ -46,6 +51,51 @@ class UserSpeakRequest(BaseModel):
 
 class DiscussionActionRequest(BaseModel):
     discussion_id: str
+
+
+class GenerateTopicRequest(BaseModel):
+    """LLM 生成讨论话题请求。"""
+    hint: str = Field("", max_length=100, description="可选的话题方向提示，如 科技 / 生活 / 教育")
+    model_config_data: Optional[Dict[str, Any]] = Field(None, description="用于生成的模型配置")
+
+
+@router.post("/generate-topic")
+async def generate_topic(request: GenerateTopicRequest):
+    """LLM 生成一个辩论/讨论话题，避免玩家面对空白话题无从开始。"""
+    from services.llm_service import LLMService
+
+    llm = LLMService()
+    hint = (request.hint or "").strip()
+    prompt = (
+        "请为一个多人 AI 辩论会想一个有趣、有争议性、适合多个角色轮流发言的话题。\n"
+        + (f"方向提示：{hint}\n" if hint else "")
+        + "要求：\n"
+        "1. 一句话命题，15-30 个字，中文；可以是「该不该 / 是不是 / 谁更」式的争议命题。\n"
+        "2. 有明显的正反两面，能引发争论，不要有标准答案。\n"
+        "3. 面向大众，不要过于小众或专业。\n"
+        '只输出 JSON：{"topic": "..."}，不要解释。'
+    )
+    try:
+        raw = await llm.generate(
+            prompt,
+            temperature=0.9,
+            max_tokens=120,
+            model_config=request.model_config_data,
+            json_mode=True,
+            session_id=f"topic:{uuid.uuid4().hex[:6]}",
+        )
+        start, end = raw.find("{"), raw.rfind("}")
+        if start == -1 or end == -1:
+            raise ValueError(f"模型未返回 JSON: {raw[:120]}")
+        topic = str(json.loads(raw[start:end + 1]).get("topic") or "").strip().strip('"')
+        if not topic:
+            raise ValueError("话题为空")
+        return {"success": True, "topic": topic}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Generate topic failed: %s", exc)
+        raise HTTPException(400, f"话题生成失败: {exc}")
 
 
 @router.post("/create")
@@ -81,7 +131,16 @@ async def create_discussion(request: CreateDiscussionRequest):
                 mbti_list=mbti_list,
                 model_config=llm_config
             )
-            
+
+            # 三游戏统一：主题阵容覆盖 + 智能模型分配（按 IQ 分档）
+            created_agents = list(service.agents.values())
+            if request.roster:
+                from services.auto_assign import apply_roster, normalize_roster
+                apply_roster(created_agents, normalize_roster(request.roster))
+            if request.auto_assign:
+                from services.auto_assign import apply_auto_assign, iq_tier_of
+                apply_auto_assign(created_agents, request.auto_assign, llm_config, iq_tier_of)
+
             # Override discussion ID
             discussion.id = discussion_id
             service.discussion.id = discussion_id
@@ -118,6 +177,14 @@ async def create_discussion(request: CreateDiscussionRequest):
                 agents = factory.create_balanced_team(request.agent_count, llm_config=llm_config)
             else:
                 agents = factory.create_batch(request.agents, llm_config=llm_config)
+
+            # 三游戏统一：主题阵容覆盖 + 智能模型分配（按 IQ 分档）
+            if request.roster:
+                from services.auto_assign import apply_roster, normalize_roster
+                apply_roster(agents, normalize_roster(request.roster))
+            if request.auto_assign:
+                from services.auto_assign import apply_auto_assign, iq_tier_of
+                apply_auto_assign(agents, request.auto_assign, llm_config, iq_tier_of)
             
             # 创建讨论对象
             discussion = Discussion(
@@ -248,6 +315,33 @@ async def stream_discussion(discussion_id: str):
             "X-Accel-Buffering": "no"
         }
     )
+
+
+@router.post("/possess")
+async def possess_agent(request: DiscussionActionRequest, agent_id: str):
+    """夺席：玩家接管某个 AI 角色。被接管的角色不再自动发言，玩家可通过
+    user_speak 代其发言。"""
+    if request.discussion_id not in active_discussions:
+        raise HTTPException(404, "Discussion not found")
+    service = active_discussions[request.discussion_id]
+    agent = service.get_agent(agent_id)
+    if not agent:
+        raise HTTPException(404, f"Agent not found: {agent_id}")
+    agent.is_possessed = True
+    return {"success": True, "agent_id": agent_id, "is_possessed": True}
+
+
+@router.post("/release")
+async def release_agent(request: DiscussionActionRequest, agent_id: str):
+    """释放夺席：归还角色给 AI。"""
+    if request.discussion_id not in active_discussions:
+        raise HTTPException(404, "Discussion not found")
+    service = active_discussions[request.discussion_id]
+    agent = service.get_agent(agent_id)
+    if not agent:
+        raise HTTPException(404, f"Agent not found: {agent_id}")
+    agent.is_possessed = False
+    return {"success": True, "agent_id": agent_id, "is_possessed": False}
 
 
 @router.post("/user-speak")
