@@ -3,6 +3,19 @@ import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { ModelConfigManager } from './ModelConfigManager';
 import { useSettingsStore } from '../store/settingsStore';
 
+// jsdom 缺少 Radix Select 依赖的浏览器 API
+class ResizeObserverStub {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+}
+if (typeof (globalThis as Record<string, unknown>).ResizeObserver === 'undefined') {
+    (globalThis as Record<string, unknown>).ResizeObserver = ResizeObserverStub;
+}
+if (typeof Element.prototype.scrollIntoView !== 'function') {
+    Element.prototype.scrollIntoView = () => {};
+}
+
 // Mock Lucide icons
 vi.mock('lucide-react', () => ({
     Search: () => <div data-testid="search-icon" />,
@@ -16,6 +29,10 @@ vi.mock('lucide-react', () => ({
     BarChart2: () => <div data-testid="chart-icon" />,
     AlertCircle: () => <div data-testid="alert-icon" />,
     CheckCircle2: () => <div data-testid="check-icon" />,
+    Eye: () => <div data-testid="eye-icon" />,
+    EyeOff: () => <div data-testid="eyeoff-icon" />,
+    Check: () => <div data-testid="check-mark-icon" />,
+    ChevronDown: () => <div data-testid="chevron-icon" />,
 }));
 
 // Mock the store

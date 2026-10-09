@@ -69,9 +69,36 @@ export interface ModelConfigTestRequest {
     prompt?: string;
 }
 
+export interface ModelConfigDraftTestRequest {
+    provider: string;
+    model: string;
+    api_key?: string | null;
+    base_url?: string | null;
+    temperature?: number | null;
+    max_tokens?: number | null;
+    top_p?: number | null;
+    frequency_penalty?: number | null;
+    presence_penalty?: number | null;
+    extra_params?: Record<string, unknown>;
+    prompt?: string;
+}
+
 export interface ModelConfigTestResponse {
     success: boolean;
     message: string;
     response?: string | null;
     duration_ms?: number | null;
+}
+
+export interface ProviderModelListRequest {
+    provider: string;
+    api_key?: string | null;
+    base_url?: string | null;
+}
+
+/** 服务商端点实时拉取的模型列表 */
+export interface ProviderModelList {
+    models: string[];
+    source: 'remote' | string;
+    count: number;
 }

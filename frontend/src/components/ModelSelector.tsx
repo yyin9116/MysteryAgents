@@ -9,15 +9,13 @@ import { AlertCircle, Check, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 import { useSettingsStore } from '../store/settingsStore';
-import type { ModelConfig } from '../types/modelConfig';
+import { pickPreferredModelConfig } from '../lib/modelProviders';
 
 interface ModelSelectorProps {
   isOpen: boolean;
   onClose: () => void;
   onSave?: (config: unknown) => void;
 }
-
-const getPreferredConfig = (configs: ModelConfig[]) => configs[0] || null;
 
 const ModelSelector: React.FC<ModelSelectorProps> = ({
   isOpen,
@@ -36,7 +34,7 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({
 
   useEffect(() => {
     if (modelConfigs.length > 0 && !selectedConfigId) {
-      const preferredConfig = getPreferredConfig(modelConfigs);
+      const preferredConfig = pickPreferredModelConfig(modelConfigs);
       setSelectedConfigId(preferredConfig?.id || '');
     }
   }, [modelConfigs, selectedConfigId]);
@@ -143,7 +141,7 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({
                 <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
                   <h4 className="font-semibold text-purple-900 mb-2">提示</h4>
                   <ul className="text-sm text-purple-800 space-y-1">
-                    <li>选择的模型配置将应用于所有 Agent。</li>
+                    <li>选择的模型配置将应用于所有玩家。</li>
                     <li>如需修改模型配置，请前往设置页面。</li>
                     <li>列表顺序按服务端返回结果展示。</li>
                   </ul>

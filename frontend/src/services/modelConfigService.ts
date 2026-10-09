@@ -3,12 +3,15 @@ import api from './api';
 import type {
     ModelConfig,
     ModelConfigCreate,
+    ModelConfigDraftTestRequest,
     ModelConfigExport,
     ModelConfigImport,
     ModelConfigImportResult,
     ModelConfigTestRequest,
     ModelConfigTestResponse,
     ModelConfigUpdate,
+    ProviderModelList,
+    ProviderModelListRequest,
 } from '../types/modelConfig';
 
 const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504]);
@@ -100,6 +103,27 @@ export const modelConfigService = {
     async testConfig(configId: string, payload: ModelConfigTestRequest): Promise<ModelConfigTestResponse> {
         const response = await requestWithRetry(() =>
             api.post<ModelConfigTestResponse>(`/api/model-configs/${configId}/test`, payload)
+        );
+        return response.data;
+    },
+
+    async testDraft(payload: ModelConfigDraftTestRequest): Promise<ModelConfigTestResponse> {
+        const response = await requestWithRetry(() =>
+            api.post<ModelConfigTestResponse>('/api/model-configs/test', payload)
+        );
+        return response.data;
+    },
+
+    /** 用草稿（表单当前值）实时拉取服务商的模型列表；失败会抛错，由调用方兜底 */
+    async listModelsDraft(payload: ProviderModelListRequest): Promise<ProviderModelList> {
+        const response = await api.post<ProviderModelList>('/api/model-configs/models', payload);
+        return response.data;
+    },
+
+    /** 用已保存配置的凭据实时拉取服务商的模型列表；失败会抛错，由调用方兜底 */
+    async listModelsForConfig(configId: string): Promise<ProviderModelList> {
+        const response = await api.get<ProviderModelList>(
+            `/api/model-configs/${configId}/models`
         );
         return response.data;
     },

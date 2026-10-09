@@ -4,6 +4,7 @@ import { ModelConfigList } from './ModelConfigList';
 import { ModelConfigEditor } from './ModelConfigEditor';
 import { UsageChart } from './UsageChart';
 import { useSettingsStore } from '../store/settingsStore';
+import { pickPreferredModelConfig } from '../lib/modelProviders';
 import type { ModelConfig, ModelConfigCreate, ModelConfigUpdate } from '../types/modelConfig';
 import type { UsageStatsResponse } from '../types/usage';
 import '../styles/modelConfig.css';
@@ -30,6 +31,14 @@ export const ModelConfigManager: React.FC = () => {
     useEffect(() => {
         fetchModelConfigs();
     }, [fetchModelConfigs]);
+
+    // 进入页面默认选中推荐配置（OpenCode Go 优先），避免编辑区空转
+    useEffect(() => {
+        if (!selectedId && !isCreating && modelConfigs.length > 0) {
+            const preferred = pickPreferredModelConfig(modelConfigs);
+            if (preferred) setSelectedId(preferred.id);
+        }
+    }, [modelConfigs, selectedId, isCreating]);
 
     const selectedConfig = useMemo(() => {
         return modelConfigs.find((c) => c.id === selectedId) || null;
@@ -113,7 +122,7 @@ export const ModelConfigManager: React.FC = () => {
     };
 
     return (
-        <div className="model-config-container bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 rounded-2xl overflow-hidden border border-white/5 shadow-2xl">
+        <div className="model-config-container bg-black/20 rounded-2xl overflow-hidden border border-line shadow-2xl">
             <ModelConfigList
                 configs={modelConfigs}
                 selectedId={selectedId || undefined}
@@ -126,24 +135,24 @@ export const ModelConfigManager: React.FC = () => {
             />
 
             <div className="flex-1 flex flex-col h-full overflow-hidden">
-                <div className="border-b border-gray-700/50 p-6 flex justify-between items-center bg-gray-800/40 backdrop-blur-md">
-                    <div>
-                        <h2 className="text-xl font-bold text-gray-100 mb-1">模型配置管理</h2>
-                        <div className="text-xs text-gray-400">
+                <div className="border-b border-line p-4 sm:p-6 flex justify-between items-center gap-3 bg-white/[0.03]">
+                    <div className="min-w-0">
+                        <h2 className="text-lg sm:text-xl font-bold text-text-primary mb-1">模型配置管理</h2>
+                        <div className="text-xs text-text-secondary/80">
                             {modelConfigsLoading ? '正在加载配置...' : `${modelConfigs.length} 个可用配置`}
                         </div>
                     </div>
-                    <div className="flex gap-3">
+                    <div className="flex shrink-0 gap-2 sm:gap-3">
                         <button
                             onClick={handleImport}
-                            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-300 bg-gray-700/40 border border-gray-600/50 rounded-xl hover:bg-gray-600/60 transition-all hover:scale-105 active:scale-95"
+                            className="flex items-center gap-2 px-3 sm:px-4 py-2 text-sm font-medium text-text-secondary whitespace-nowrap rounded-xl border border-line bg-white/[0.04] hover:border-violet/40 hover:text-violet hover:bg-violet/10 transition-all active:scale-95"
                         >
                             <Upload size={16} />
                             导入
                         </button>
                         <button
                             onClick={handleExport}
-                            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-300 bg-gray-700/40 border border-gray-600/50 rounded-xl hover:bg-gray-600/60 transition-all hover:scale-105 active:scale-95"
+                            className="flex items-center gap-2 px-3 sm:px-4 py-2 text-sm font-medium text-text-secondary whitespace-nowrap rounded-xl border border-line bg-white/[0.04] hover:border-violet/40 hover:text-violet hover:bg-violet/10 transition-all active:scale-95"
                         >
                             <Download size={16} />
                             导出
@@ -159,33 +168,33 @@ export const ModelConfigManager: React.FC = () => {
                     />
 
                     {selectedId && usageData && (
-                        <div className="px-8 pb-12 max-w-4xl mx-auto mt-8">
-                            <div className="bg-gray-800/50 backdrop-blur-sm p-6 rounded-xl border border-gray-700 shadow-sm">
-                                <div className="flex items-center gap-2 mb-6">
-                                    <BarChart2 className="text-blue-400" size={20} />
-                                    <h3 className="text-lg font-bold text-gray-200">使用统计 (过去 30 天)</h3>
+                        <div className="px-4 sm:px-8 pb-12 max-w-4xl mx-auto mt-8">
+                            <div className="bg-white/[0.03] p-4 sm:p-6 rounded-2xl border border-line">
+                                <div className="flex items-center gap-2 mb-4 sm:mb-6">
+                                    <BarChart2 className="text-info" size={20} />
+                                    <h3 className="text-base sm:text-lg font-bold text-text-primary">使用统计 (过去 30 天)</h3>
                                 </div>
 
-                                <div className="grid grid-cols-3 gap-6 mb-8">
-                                    <div className="bg-blue-500/10 p-4 rounded-lg border border-blue-500/20">
-                                        <div className="text-xs text-blue-400 font-semibold uppercase tracking-wider">总 Tokens</div>
-                                        <div className="text-2xl font-bold text-blue-300">{usageData.summary.total_tokens.toLocaleString()}</div>
+                                <div className="grid grid-cols-3 gap-2 sm:gap-6 mb-6 sm:mb-8">
+                                    <div className="bg-info/10 p-3 sm:p-4 rounded-xl border border-info/25">
+                                        <div className="text-[10px] sm:text-xs text-info font-semibold uppercase tracking-wider">总 Tokens</div>
+                                        <div className="text-lg sm:text-2xl font-bold text-info/90 font-hud truncate">{usageData.summary.total_tokens.toLocaleString()}</div>
                                     </div>
-                                    <div className="bg-green-500/10 p-4 rounded-lg border border-green-500/20">
-                                        <div className="text-xs text-green-400 font-semibold uppercase tracking-wider">总成本</div>
-                                        <div className="text-2xl font-bold text-green-300">${usageData.summary.total_cost.toFixed(4)}</div>
+                                    <div className="bg-success/10 p-3 sm:p-4 rounded-xl border border-success/25">
+                                        <div className="text-[10px] sm:text-xs text-success font-semibold uppercase tracking-wider">总成本</div>
+                                        <div className="text-lg sm:text-2xl font-bold text-success/90 font-hud truncate">${usageData.summary.total_cost.toFixed(4)}</div>
                                     </div>
-                                    <div className="bg-purple-500/10 p-4 rounded-lg border border-purple-500/20">
-                                        <div className="text-xs text-purple-400 font-semibold uppercase tracking-wider">调用次数</div>
-                                        <div className="text-2xl font-bold text-purple-300">{usageData.summary.call_count}</div>
+                                    <div className="bg-violet/10 p-3 sm:p-4 rounded-xl border border-violet/25">
+                                        <div className="text-[10px] sm:text-xs text-violet font-semibold uppercase tracking-wider">调用次数</div>
+                                        <div className="text-lg sm:text-2xl font-bold text-violet/90 font-hud truncate">{usageData.summary.call_count}</div>
                                     </div>
                                 </div>
 
                                 <div className="space-y-6">
                                     <div>
-                                        <div className="text-sm font-medium text-gray-400 mb-2">每日 Token 消耗</div>
+                                        <div className="text-sm font-medium text-text-secondary mb-2">每日 Token 消耗</div>
                                         <div className="h-40">
-                                            <UsageChart data={usageData.by_time} type="tokens" color="bg-blue-500" height={160} />
+                                            <UsageChart data={usageData.by_time} type="tokens" color="bg-info" height={160} />
                                         </div>
                                     </div>
                                 </div>

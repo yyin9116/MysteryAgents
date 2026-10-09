@@ -53,6 +53,53 @@ class ModelConfigCreate(ModelConfigBase):
     """Create request for model configuration."""
 
 
+class ModelModelsRequest(BaseModel):
+    """Request body for fetching the live model list of a provider draft."""
+
+    provider: str = Field(default="openai", min_length=1, max_length=50)
+    api_key: Optional[str] = Field(default=None, max_length=255)
+    base_url: Optional[str] = Field(default=None, max_length=255)
+
+
+class ModelListResponse(BaseModel):
+    """Live model list fetched from the provider endpoint."""
+
+    models: List[str] = Field(default_factory=list)
+    source: str = Field(default="remote")
+    count: int = Field(default=0)
+
+
+class ModelConfigDraftTestRequest(BaseModel):
+    """Request body for testing an unsaved model configuration draft."""
+
+    provider: str = Field(default="openai", min_length=1, max_length=50)
+    model: str = Field(..., min_length=1, max_length=100)
+    api_key: Optional[str] = Field(default=None, max_length=255)
+    base_url: Optional[str] = Field(default=None, max_length=255)
+    temperature: Optional[float] = Field(default=0.7, ge=0.0, le=2.0)
+    max_tokens: Optional[int] = Field(default=None, ge=1)
+    top_p: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    frequency_penalty: Optional[float] = Field(default=None, ge=-2.0, le=2.0)
+    presence_penalty: Optional[float] = Field(default=None, ge=-2.0, le=2.0)
+    extra_params: Dict[str, Any] = Field(default_factory=dict)
+    prompt: str = Field(default="Respond with the word 'pong'.", min_length=1, max_length=500)
+
+    @field_validator("provider", "model", mode="before")
+    @classmethod
+    def strip_required_strings(cls, value):
+        if not isinstance(value, str):
+            raise ValueError("Must be a string")
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Field cannot be empty")
+        return cleaned
+
+    @field_validator("api_key", "base_url", mode="before")
+    @classmethod
+    def strip_optional_strings(cls, value):
+        return _clean_optional(value)
+
+
 class ModelConfigUpdate(BaseModel):
     """Update request for model configuration."""
 
