@@ -1,7 +1,6 @@
-/* 狼人杀暗黑神秘风专用样式 */
-
+/* 狼人杀页面容器：背景对齐设计系统 --ds-bg-base（夜幕 #0D0B14） */
 .ww-container {
-  background: radial-gradient(circle at center, var(--color-ww-deep-purple) 0%, var(--color-ww-bg) 100%);
+  background: var(--ds-bg-base, #0d0b14);
   min-height: 100vh;
   color: white;
   overflow: hidden;

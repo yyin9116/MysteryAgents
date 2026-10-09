@@ -105,7 +105,7 @@ const AgentDetailModal: React.FC<AgentDetailModalProps> = ({
                         }`}>
                             <Brain className="w-5 h-5" />
                         </div>
-                        <h2 className="text-xl font-bold">Agent 详情</h2>
+                        <h2 className="text-xl font-bold">玩家详情</h2>
                     </div>
                     <button
                         onClick={onClose}

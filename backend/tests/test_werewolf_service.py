@@ -876,3 +876,186 @@ class TestWerewolfService:
             # Advance to next round
             game.advance_to_next_round()
             assert game.state.current_round == 2
+
+
+class TestAutoModelAssign:
+    """智能模型分配：黑名单过滤 + 按角色分档 + 思考强度注入。"""
+
+    def test_filter_candidate_models_drops_blacklist_substrings(self):
+        game = WerewolfService(game_id="test_auto_filter", player_count=6)
+        candidates = ["gpt-5", "gpt-5-mini", "claude-sonnet-4", "qwen3-8b", "  ", "gpt-5"]
+        result = game._filter_candidate_models(candidates, ["mini", "8b"])
+
+        assert result == ["gpt-5", "claude-sonnet-4"]
+
+    def test_rank_model_strength_orders_strong_first(self):
+        ranked = sorted(
+            ["qwen3-8b", "gpt-5", "claude-3-5-haiku", "claude-opus-4"],
+            key=WerewolfService._rank_model_strength,
+            reverse=True,
+        )
+        assert ranked[0] in ("gpt-5", "claude-opus-4")
+        assert ranked[-1] in ("qwen3-8b", "claude-3-5-haiku")
+
+    def test_auto_plan_assigns_models_and_effort_by_role(self):
+        model_config = {"provider": "opencode", "model": "gpt-5-mini", "api_key": "k", "base_url": "https://x"}
+        game = WerewolfService(
+            game_id="test_auto_plan",
+            player_count=9,
+            model_config=model_config,
+            auto_model_plan={
+                "candidates": ["gpt-5", "claude-opus-4", "qwen3-8b", "gpt-5-mini", "glm-4.5-flash"],
+                "blacklist": [],
+                "effort_by_role": True,
+            },
+        )
+        # 每个槽位都拿到了模型且注入了 reasoning_effort
+        efforts = {"high", "medium", "low"}
+        for state in game.state.agents.values():
+            agent = game.agents[state.agent_id]
+            assert agent.model_config is not None
+            assert agent.model_config.get("model")
+            effort = (agent.model_config.get("extra_params") or {}).get("reasoning_effort")
+            assert effort in efforts
+        # 核心角色（狼人/预言家/女巫）应该拿到高强度思考
+        core_efforts = {
+            (agent.model_config.get("extra_params") or {}).get("reasoning_effort")
+            for agent in game.agents.values()
+            if game.get_agent_state(agent.config.id).role
+            in (WerewolfRole.WEREWOLF, WerewolfRole.SEER, WerewolfRole.WITCH)
+        }
+        assert core_efforts == {"high"}
+
+    def test_auto_plan_respects_blacklist(self):
+        model_config = {"provider": "opencode", "model": "gpt-5-mini", "api_key": "k", "base_url": "https://x"}
+        game = WerewolfService(
+            game_id="test_auto_blacklist",
+            player_count=6,
+            model_config=model_config,
+            auto_model_plan={
+                "candidates": ["gpt-5", "gpt-5-mini", "qwen3-8b"],
+                "blacklist": ["mini", "8b"],
+                "effort_by_role": True,
+            },
+        )
+        used = {agent.model_config["model"] for agent in game.agents.values()}
+        assert used == {"gpt-5"}
+
+    def test_manual_per_agent_override_wins_over_auto_plan(self):
+        model_config = {"provider": "opencode", "model": "gpt-5", "api_key": "k", "base_url": "https://x"}
+        manual = {"provider": "opencode", "model": "my-manual-model", "api_key": "k", "base_url": "https://x"}
+        game = WerewolfService(
+            game_id="test_auto_manual",
+            player_count=6,
+            model_config=model_config,
+            agent_model_configs=[manual] + [None] * 5,
+            auto_model_plan={
+                "candidates": ["gpt-5", "qwen3-8b"],
+                "blacklist": [],
+                "effort_by_role": True,
+            },
+        )
+        slot0 = game.agents["werewolf_agent_1"]
+        assert slot0.model_config["model"] == "my-manual-model"
+        # 手动指定不注入 reasoning_effort
+        assert not (slot0.model_config.get("extra_params") or {}).get("reasoning_effort")
+
+
+class TestOpeningTurn:
+    """开局阶段：入座开场白。"""
+
+    def test_run_opening_turn_appends_history_and_event(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        game = WerewolfService(game_id="test_opening", player_count=6)
+        agent_id = next(iter(game.agents))
+        game.agents[agent_id].generate_description = AsyncMock(
+            return_value={
+                "thought": "很期待今晚。",
+                "speech": "大家好，我是 {name}，请多关照。".format(name=game.state.agents[agent_id].name),
+                "suspicion": {"werewolf_agent_2": 3},
+            }
+        )
+
+        message = asyncio.run(game.run_opening_turn(agent_id))
+
+        assert message["type"] == "opening"
+        assert message["content"].startswith("大家好")
+        assert game.state.conversation_history[-1]["type"] == "opening"
+        # 怀疑分指向自己时会被剔除
+        assert agent_id not in message["suspicion"]
+
+    def test_opening_prompt_registered(self):
+        game = WerewolfService(game_id="test_opening_prompt", player_count=6)
+        speaker = next(iter(game.state.agents.values()))
+        prompt = game._build_opening_prompt(speaker)
+
+        assert "入座开场白" in prompt
+        assert speaker.name in prompt
+        assert "不能透露身份" in prompt
+
+
+class TestGroupChatDiscussion:
+    """QQ 群聊式讨论：多条短消息气泡。"""
+
+    def test_chat_style_group_chat_produces_bubbles(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        model_config = {"provider": "opencode", "model": "gpt-5", "api_key": "k", "base_url": "https://x"}
+        game = WerewolfService(
+            game_id="test_group_chat",
+            player_count=6,
+            model_config=model_config,
+            game_config={"chat_style": "group_chat"},
+        )
+        assert game.chat_style == "group_chat"
+
+        agent_id = next(iter(game.agents))
+        bubbles = ["这局势有点微妙？", "@某人 你昨晚很安静啊", "我先蹲一个观察位 [吃瓜]"]
+        game.agents[agent_id].generate_chat_messages = AsyncMock(
+            return_value={
+                "thought": "先试探一下。",
+                "messages": bubbles,
+                "suspicion": {"werewolf_agent_2": 5},
+            }
+        )
+
+        message = asyncio.run(game.run_discussion_turn(agent_id))
+
+        assert message["bubbles"] == bubbles
+        assert message["speech"] == " / ".join(bubbles)
+        # 每条气泡单独进入对话历史，作为后续群聊上下文
+        history_entries = [msg for msg in game.state.conversation_history if msg.get("agent_id") == agent_id]
+        assert len(history_entries) == 3
+        assert [entry["content"] for entry in history_entries] == bubbles
+
+    def test_default_style_keeps_single_speech(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        game = WerewolfService(game_id="test_plain_chat", player_count=6)
+        assert game.chat_style == "speech"
+
+        agent_id = next(iter(game.agents))
+        game.agents[agent_id].generate_description = AsyncMock(
+            return_value={"thought": "分析中", "speech": "我怀疑昨晚的刀口很有讲究。", "suspicion": {}}
+        )
+
+        message = asyncio.run(game.run_discussion_turn(agent_id))
+        assert message["bubbles"] == [message["content"]]
+        assert len([m for m in game.state.conversation_history if m.get("agent_id") == agent_id]) == 1
+
+    def test_chat_prompt_registered(self):
+        game = WerewolfService(
+            game_id="test_chat_prompt",
+            player_count=6,
+            game_config={"chat_style": "group_chat"},
+        )
+        speaker = next(iter(game.state.agents.values()))
+        prompt = game._build_chat_prompt(speaker)
+
+        assert "群聊" in prompt
+        assert "messages" in prompt
+        assert speaker.name in prompt

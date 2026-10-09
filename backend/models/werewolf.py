@@ -79,6 +79,7 @@ class WerewolfAgentState(BaseModel):
     vote_history: List[Dict[str, Any]] = Field(default_factory=list, description="投票历史")
     mbti_type: str = Field("INTJ", description="MBTI 类型")
     iq_level: str = Field("Mid", description="IQ 等级")
+    model_label: Optional[str] = Field(None, description="该玩家使用的模型标识（provider/model），用于多模型实验展示")
 
 
 class WerewolfGameConfig(BaseModel):

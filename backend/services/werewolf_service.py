@@ -12,7 +12,9 @@ Implements complete werewolf game logic including:
 import logging
 import json
 import random
+import re
 import uuid
+import asyncio
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 
@@ -25,6 +27,7 @@ from models.agent import Agent, AgentConfig, IQLevel
 from models.personality import PersonalityPrompt
 from services.agent_factory import AgentFactory
 from services.memory_service import AgentMemorySystem
+from services import prompt_registry
 from services.werewolf_replay_store import werewolf_replay_store
 
 logger = logging.getLogger(__name__)
@@ -39,6 +42,12 @@ class WerewolfService:
         player_count: int,
         model_config: Optional[Dict[str, Any]] = None,
         game_config: Optional[Dict[str, Any]] = None,
+        agent_model_configs: Optional[List[Optional[Dict[str, Any]]]] = None,
+        roster: Optional[List[Dict[str, Any]]] = None,
+        roster_work: Optional[str] = None,
+        auto_model_plan: Optional[Dict[str, Any]] = None,
+        player_mode: str = "spectate",
+        player_agent_id: Optional[str] = None,
     ):
         """
         Initialize werewolf game.
@@ -46,7 +55,20 @@ class WerewolfService:
         Args:
             game_id: Unique game identifier
             player_count: Number of players (6-12)
-            model_config: Optional model configuration for agents
+            model_config: Optional model configuration shared by all agents
+            agent_model_configs: Optional per-slot model overrides; index i maps
+                to werewolf_agent_{i+1}. None entries inherit model_config.
+            roster: Optional themed roster (name + mbti + gender per slot) from
+                the roster preview; index i maps to werewolf_agent_{i+1}.
+                When present, agent names/MBTI come from the roster and the
+                LLM rename pass is skipped to keep the theme intact.
+            roster_work: Optional source work name (e.g. 西游记) the roster
+                characters come from; used to flavor public speech with the
+                character's iconic traits.
+            auto_model_plan: Optional smart model assignment plan:
+                {"candidates": [...], "blacklist": [...], "effort_by_role": bool}.
+                Roles are assigned inside _create_agents, so slot→model mapping
+                is computed there by role strength tier.
         """
         if player_count not in ROLE_DISTRIBUTION:
             raise ValueError(f"Invalid player count: {player_count}. Must be 6-12.")
@@ -54,8 +76,19 @@ class WerewolfService:
         self.game_id = game_id
         self.player_count = player_count
         self.model_config = model_config
+        self.agent_model_configs = agent_model_configs
+        self.auto_model_plan = auto_model_plan or {}
+        self.roster = self._normalize_roster(roster)
+        self.roster_work = (roster_work or "").strip()
+        # 夺席模式下玩家代打的发言：agent_id -> 待消费的发言文本
+        self.pending_player_speeches: Dict[str, str] = {}
+        # 参与模式：participate = 玩家接管一个席位（发言/投票由玩家提交）
+        self.player_mode = player_mode if player_mode in ("spectate", "participate") else "spectate"
+        self.player_agent_id = player_agent_id
         self.game_config = game_config or {}
         self.fast_mode = bool(self.game_config.get("fast_mode", False))
+        # 讨论风格：speech = 圆桌完整发言；group_chat = QQ/微信群聊短消息气泡
+        self.chat_style = self.game_config.get("chat_style") or "speech"
         configured_turn_limit = self.game_config.get("discussion_turn_limit")
         if configured_turn_limit is None and self.fast_mode:
             configured_turn_limit = min(2, player_count)
@@ -82,6 +115,13 @@ class WerewolfService:
 
         # Create agents with role assignment
         self._create_agents()
+
+        # 参与模式：玩家接管的席位标记为受控（仅状态层，运行时仍可代打）
+        if self.player_mode == "participate":
+            if not self.player_agent_id or self.player_agent_id not in self.state.agents:
+                self.player_agent_id = "werewolf_agent_1"
+            self.state.agents[self.player_agent_id].is_possessed = True
+
         self._persist_replay()
 
         logger.info(f"Created werewolf game {game_id} with {player_count} players")
@@ -105,6 +145,183 @@ class WerewolfService:
         """Return enum value when present, otherwise the raw value."""
         return value.value if hasattr(value, "value") else value
 
+    # 间隔号变体统一为「·」：・(片假名中点)、‧、•、∙ 等
+    _NAME_SEPARATOR_VARIANTS = str.maketrans({"・": "·", "‧": "·", "•": "·", "∙": "·", "⋅": "·"})
+    _EMOJI_RE = re.compile(
+        "[\U0001F000-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF\u2B00-\u2BFF\uFE0F]"
+    )
+
+    @classmethod
+    def _clean_character_name(cls, name: str) -> str:
+        """统一译名分隔符并去掉 emoji：译名拆分由提示词负责；・→·；去除空白。"""
+        name = cls._EMOJI_RE.sub("", name)
+        name = name.translate(cls._NAME_SEPARATOR_VARIANTS)
+        name = re.sub(r"\s+", "", name)
+        return name
+
+    @staticmethod
+    def _normalize_roster(roster: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+        """Normalize a themed roster: keep valid entries, dedupe names."""
+        if not roster:
+            return []
+        valid_mbti = {
+            "ENTJ", "INFP", "ISTP", "ENFJ", "INTP", "ESTJ", "ISFP", "ENTP",
+            "ISFJ", "ESFP", "INTJ", "ESFJ", "ESTP", "INFJ", "ENFP", "ISTJ",
+        }
+        normalized: List[Dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in roster:
+            if not isinstance(item, dict):
+                continue
+            name = WerewolfService._clean_character_name(str(item.get("name") or "")).strip()
+            mbti = str(item.get("mbti") or "").strip().upper()
+            if not (2 <= len(name) <= 15) or name in seen or mbti not in valid_mbti:
+                continue
+            seen.add(name)
+            normalized.append(
+                {
+                    "name": name,
+                    "mbti": mbti,
+                    "gender": "女" if "女" in str(item.get("gender") or "") else "男",
+                }
+            )
+        return normalized
+
+    # 角色强度分档：0 = 需要最强推理（核心博弈角色），1 = 中等，2 = 轻量
+    _ROLE_TIER = {
+        WerewolfRole.WEREWOLF: 0,
+        WerewolfRole.SEER: 0,
+        WerewolfRole.WITCH: 0,
+        WerewolfRole.HUNTER: 1,
+        WerewolfRole.GUARD: 1,
+        WerewolfRole.VILLAGER: 2,
+    }
+
+    # 思考强度：核心角色高配思考，村民轻量思考
+    _ROLE_EFFORT = {
+        WerewolfRole.WEREWOLF: "high",
+        WerewolfRole.SEER: "high",
+        WerewolfRole.WITCH: "high",
+        WerewolfRole.HUNTER: "medium",
+        WerewolfRole.GUARD: "medium",
+        WerewolfRole.VILLAGER: "low",
+    }
+
+    # 模型强度启发式：关键词命中计分，分高 = 更强
+    _MODEL_STRONG_KEYWORDS = (
+        "opus", "gpt-5", "gpt-4.1", "o3", "o4", "pro", "max", "grok-4",
+        "deepseek-r1", "-r1", "glm-4.6", "glm-4.5", "kimi-k2", "qwen-max",
+        "thinking", "reasoner", "ultra", "plus",
+    )
+    _MODEL_WEAK_KEYWORDS = (
+        "mini", "flash", "lite", "nano", "small", "tiny", "-8b", "-7b", "-4b",
+        "haiku", "instant", "-air", "turbo", "free", "spark",
+    )
+
+    @classmethod
+    def _rank_model_strength(cls, model_id: str) -> tuple[int, str]:
+        """Score a model id by keyword heuristics; higher = stronger."""
+        normalized = (model_id or "").lower()
+        score = 0
+        for keyword in cls._MODEL_STRONG_KEYWORDS:
+            if keyword in normalized:
+                score += 2
+        for keyword in cls._MODEL_WEAK_KEYWORDS:
+            if keyword in normalized:
+                score -= 2
+        return (score, normalized)
+
+    @staticmethod
+    def _filter_candidate_models(
+        candidates: Optional[List[str]] = None,
+        blacklist: Optional[List[str]] = None,
+        disabled_models: Optional[List[str]] = None,
+    ) -> List[str]:
+        """Normalize candidates and drop disabled ones.
+
+        disabled_models: 精确匹配（前端模型列表勾选禁用，传完整模型 id）；
+        blacklist: 兼容旧版关键字子串匹配。
+        """
+        # 兼容旧的实例调用签名 (candidates, blacklist)
+        patterns = [
+            str(item).strip().lower()
+            for item in (blacklist or [])
+            if str(item).strip()
+        ]
+        disabled = {
+            str(item).strip().lower()
+            for item in (disabled_models or [])
+            if str(item).strip()
+        }
+        seen: set[str] = set()
+        result: List[str] = []
+        for item in candidates or []:
+            model_id = str(item).strip()
+            if not model_id:
+                continue
+            key = model_id.lower()
+            if key in seen or key in disabled:
+                continue
+            if any(pattern in key or key in pattern for pattern in patterns):
+                continue
+            seen.add(key)
+            result.append(model_id)
+        return result
+
+    def _plan_auto_models(self, roles: List[WerewolfRole]) -> Dict[int, Dict[str, Any]]:
+        """Compute slot → {model, effort} mapping by role strength tier.
+
+        Called from _create_agents after roles are known. Candidates are ranked
+        strong→weak; tier-0 roles pick from the strongest end, tier-2 from the
+        weakest end, tier-1 from the middle. When the pool is small the pool
+        cycles so every player still gets a deterministic assignment.
+        """
+        plan = self.auto_model_plan or {}
+        if not self.model_config:
+            return {}
+        candidates = self._filter_candidate_models(
+            plan.get("candidates"),
+            plan.get("blacklist"),
+            plan.get("disabled_models"),
+        )
+        if not candidates:
+            logger.warning(
+                "Auto model plan for game %s has no usable candidates after blacklist filter",
+                self.game_id,
+            )
+            return {}
+
+        ranked = sorted(candidates, key=self._rank_model_strength, reverse=True)
+        groups: Dict[int, List[int]] = {0: [], 1: [], 2: []}
+        for idx, role in enumerate(roles):
+            groups[self._ROLE_TIER[role]].append(idx)
+
+        mid = len(ranked) // 3
+        pools = {
+            0: ranked,
+            1: ranked[mid:] if len(ranked) >= 3 else ranked,
+            2: list(reversed(ranked)),
+        }
+        cursors = {0: 0, 1: 0, 2: 0}
+        assignment: Dict[int, Dict[str, Any]] = {}
+        for tier in (0, 1, 2):
+            pool = pools[tier]
+            for idx in groups[tier]:
+                effort = self._ROLE_EFFORT[roles[idx]] if plan.get("effort_by_role", True) else None
+                if self.fast_mode:
+                    # 快测模式压低思考强度，避免推理模型拖慢发言节奏
+                    effort = "low"
+                assignment[idx] = {
+                    "model": pool[cursors[tier] % len(pool)],
+                    "effort": effort,
+                }
+                cursors[tier] += 1
+        logger.info(
+            "Auto model plan for game %s: %s candidates -> %s slots assigned",
+            self.game_id, len(ranked), len(assignment),
+        )
+        return assignment
+
     def _create_agents(self):
         """Create agents and assign roles."""
         # Get role distribution for player count
@@ -118,6 +335,9 @@ class WerewolfService:
         # Shuffle roles
         random.shuffle(roles)
 
+        # 智能模型分配：角色已定，按强度分档为每个槽位预选模型与思考强度
+        auto_assignments = self._plan_auto_models(roles)
+
         # Create agent factory
         factory = AgentFactory()
 
@@ -125,8 +345,36 @@ class WerewolfService:
         for i, role in enumerate(roles):
             agent_id = f"werewolf_agent_{i+1}"
 
+            # Per-slot model override: index i -> werewolf_agent_{i+1}
+            per_agent_config = None
+            if self.agent_model_configs and i < len(self.agent_model_configs):
+                per_agent_config = self.agent_model_configs[i]
+            effective_config = per_agent_config or self.model_config
+
+            # 智能分配只在玩家未手动指定模型时生效
+            auto_pick = auto_assignments.get(i)
+            if auto_pick and per_agent_config is None and effective_config:
+                effective_config = {
+                    **effective_config,
+                    "model": auto_pick["model"],
+                }
+                if auto_pick.get("effort"):
+                    effective_config["extra_params"] = {
+                        **(effective_config.get("extra_params") or {}),
+                        "reasoning_effort": auto_pick["effort"],
+                    }
+
             # Select MBTI and IQ based on role
             mbti_type, iq_level = self._select_personality_for_role(role)
+
+            # 主题角色阵容：名字与 MBTI 由 roster 指定（名-MBTI-性别绑定）
+            gender_note = ""
+            agent_name = None
+            if self.roster and i < len(self.roster):
+                entry = self.roster[i]
+                agent_name = entry["name"]
+                mbti_type = entry["mbti"]
+                gender_note = f"\n- 性别: {entry['gender']}（角色扮演时保持一致的性别气质）"
 
             # Create agent config
             config = AgentConfig(
@@ -134,7 +382,7 @@ class WerewolfService:
                 mbti_type=mbti_type,
                 iq_level=iq_level,
                 word=None,  # No word in werewolf game
-                name=factory._generate_name(mbti_type)
+                name=agent_name or factory._generate_name(mbti_type)
             )
 
             # Create memory system
@@ -144,20 +392,39 @@ class WerewolfService:
 
             # Create agent
             role_name = get_role_name_cn(role)
+            work_note = ""
+            if self.roster_work and agent_name:
+                work_note = (
+                    f"\n- 角色出处: 你的名字「{agent_name}」来自作品《{self.roster_work}》。"
+                    f"公开发言可以适度带入这个角色的经典气质、口头禅或比喻方式（符合大众对"
+                    f"该角色的印象即可，不必考据原著），让发言更有辨识度；"
+                    f"但狼人杀的局势判断、怀疑与投票逻辑必须基于场上信息，"
+                    f"绝不能把原著情节当成对局里的事实。"
+                )
             runtime_context = (
                 "这是狼人杀游戏，不是《谁是卧底》。\n"
                 f"- 真实角色: {role_name}\n"
                 f"- 阵营: {faction.value}\n"
                 "- 没有词语描述任务；所有发言、投票和夜间行动都围绕狼人杀局势推理。\n"
                 "- 不要在公开发言中泄露只有自己阵营或神职才知道的私密信息，除非策略明确要求跳身份。"
+                f"{gender_note}"
+                f"{work_note}"
             )
             agent = Agent(
                 config=config,
                 memory_system=memory_system,
-                model_config=self.model_config,
+                model_config=effective_config,
                 runtime_context=runtime_context,
             )
             self.agents[agent_id] = agent
+
+            # Model label for the multi-model experiment HUD
+            model_label = None
+            if effective_config:
+                provider = effective_config.get("provider")
+                model_id = effective_config.get("model")
+                if provider or model_id:
+                    model_label = f"{provider or 'default'}/{model_id or ''}"
 
             # Create agent state
             agent_state = WerewolfAgentState(
@@ -168,7 +435,8 @@ class WerewolfService:
                 is_alive=True,
                 is_possessed=False,
                 mbti_type=mbti_type,
-                iq_level=iq_level
+                iq_level=iq_level,
+                model_label=model_label
             )
 
             # Initialize role-specific state
@@ -183,6 +451,57 @@ class WerewolfService:
             self.state.agents[agent_id] = agent_state
 
             logger.info(f"Created agent {agent_id} ({config.name}) - Role: {get_role_name_cn(role)}, Faction: {faction.value}")
+
+    async def apply_llm_agent_names(self) -> int:
+        """用 LLM 为每个玩家生成个性化昵称（多模型实验的观感增强）。
+
+        - 每个玩家使用各自的 model_config 调用，保证「不同玩家不同模型」时
+          昵称风格也来自对应模型；
+        - 并发执行、单玩家失败不影响他人；
+        - 成功后更新 AgentConfig 与对局状态并持久化回放；
+        - 失败/超时/重名时保留角色库生成的名字作为兜底。
+
+        Returns:
+            成功改名的玩家数量
+        """
+        from services.llm_service import LLMService
+
+        llm = LLMService()
+        used_names = {a.config.name for a in self.agents.values() if a.config.name}
+
+        async def _rename(agent_id: str, agent: Agent) -> bool:
+            try:
+                raw = await llm.generate_agent_name(
+                    mbti_type=str(getattr(agent.config.mbti_type, "value", agent.config.mbti_type)),
+                    iq_level=str(getattr(agent.config.iq_level, "value", agent.config.iq_level)),
+                    session_id=f"{self.game_id}:{agent_id}",
+                    model_config=agent.model_config,
+                )
+            except Exception as exc:
+                logger.warning("LLM naming failed for %s: %s", agent_id, exc)
+                return False
+
+            name = (raw or "").strip().strip('"\'，。！？\n ')
+            if not name or len(name) < 2 or len(name) > 15 or name in used_names:
+                logger.info("LLM name %r rejected for %s, keeping fallback", name, agent_id)
+                return False
+
+            used_names.add(name)
+            agent.config.name = name
+            state = self.state.agents.get(agent_id)
+            if state is not None:
+                state.name = name
+            return True
+
+        results = await asyncio.gather(
+            *[_rename(agent_id, agent) for agent_id, agent in self.agents.items()],
+            return_exceptions=True,
+        )
+        renamed = sum(1 for ok in results if ok is True)
+        if renamed:
+            logger.info("LLM renamed %s/%s agents in game %s", renamed, len(self.agents), self.game_id)
+            self._persist_replay()
+        return renamed
 
     def _select_personality_for_role(self, role: WerewolfRole) -> tuple[str, str]:
         """Select appropriate MBTI and IQ for a role."""
@@ -764,6 +1083,24 @@ class WerewolfService:
             f"- {WerewolfService._build_iq_profile(iq_level)}"
         )
 
+    def _build_character_style(self, agent_state: WerewolfAgentState) -> str:
+        """公开发言的风格要求：MBTI 人设 + 作品角色味道（若阵容来自作品）。"""
+        parts = []
+        if self.roster_work:
+            parts.append(
+                f"你的角色「{agent_state.name}」来自作品《{self.roster_work}》："
+                f"发言的语气、口头禅或打比方的方式可以贴合大众对这个角色的印象"
+                f"（绰号、经典台词风格、行事做派均可），让旁观者一读就觉得“像他”；"
+                f"但局势判断必须基于本场信息，不能把原著情节当成对局事实。"
+            )
+        parts.append(
+            "发言必须明显体现你的 MBTI 性格与 IQ 层次：强势的人带队施压、"
+            "细腻的人犹豫观察、理性的人讲逻辑链、感性的人先讲感受；"
+            "同一局里你的语气要保持稳定，不能每句话像换了一个灵魂。"
+        )
+        parts.append("严禁在发言中使用任何 emoji 表情或颜文字。")
+        return "\n".join(f"- {p}" for p in parts)
+
     @staticmethod
     def _build_private_knowledge_rules(agent_state: WerewolfAgentState) -> str:
         role_name = get_role_name_cn(agent_state.role)
@@ -1080,23 +1417,24 @@ class WerewolfService:
         ) or "（无）"
         memory_context = chooser_agent.memory_system.get_conversation_context(self.state.current_round)
         public_history = self._summarize_recent_public_history()
-        system_prompt = f"""你正在参与狼人杀夜晚决策。
-身份：{chooser_state.name}({chooser_state.agent_id})，真实角色={role_name}，MBTI={chooser_state.mbti_type}，IQ={chooser_state.iq_level}。
-人设：{self._build_night_persona_brief(chooser_state)}
-任务：{action_name}。{action_summary}
-额外信息：{extra_context or '暂无'}
-局势：{self._build_night_table_summary()}
-候选目标：
-{target_text}
-记忆：{memory_context or '暂无'}
-最近公开发言：{public_history}
-私密边界：{self._build_night_private_brief(chooser_state)}
-输出要求：
-1. 只输出一行 JSON：{{"thought":"...","vote":"玩家ID","confidence":0.75}}
-2. vote 只能填写候选目标里的玩家 ID。
-3. thought 必须像这个角色本人在夜里权衡，带一点 MBTI 气质，不要模板句。
-4. 好人不能写狼队视角；狼人也不能把自己写成别的真实身份。
-5. confidence 必须是 0 到 1 的数字。"""
+        system_prompt = prompt_registry.render("werewolf_night_prompt", {
+            "chooser_name": chooser_state.name,
+            "chooser_id": chooser_state.agent_id,
+            "role_name": role_name,
+            "mbti_type": chooser_state.mbti_type,
+            "iq_level": chooser_state.iq_level,
+            "persona_brief": self._build_night_persona_brief(chooser_state),
+            "action_name": action_name,
+            "action_summary": action_summary,
+            "extra_context": extra_context or "暂无",
+            "table_summary": self._build_night_table_summary(),
+            "candidates_label": "候选目标",
+            "candidates_text": target_text,
+            "memory_context": memory_context or "暂无",
+            "public_history": public_history,
+            "private_brief": self._build_night_private_brief(chooser_state),
+            "vote_target_label": "玩家ID",
+        })
         decision = await self._generate_json_decision(
             chooser_id,
             f"请立即完成“{action_name}”决策，只能从候选目标中选择，并严格按 JSON 返回。",
@@ -1156,23 +1494,24 @@ class WerewolfService:
         ) or "（无）"
         memory_context = chooser_agent.memory_system.get_conversation_context(self.state.current_round)
         public_history = self._summarize_recent_public_history()
-        system_prompt = f"""你正在参与狼人杀夜晚决策。
-身份：{chooser_state.name}({chooser_state.agent_id})，真实角色={role_name}，MBTI={chooser_state.mbti_type}，IQ={chooser_state.iq_level}。
-人设：{self._build_night_persona_brief(chooser_state)}
-任务：{action_name}。{action_summary}
-额外信息：{extra_context or '暂无'}
-局势：{self._build_night_table_summary()}
-可选项：
-{option_text}
-记忆：{memory_context or '暂无'}
-最近公开发言：{public_history}
-私密边界：{self._build_night_private_brief(chooser_state)}
-输出要求：
-1. 只输出一行 JSON：{{"thought":"...","vote":"可选项ID","confidence":0.75}}
-2. vote 只能填写可选项里的 ID。
-3. thought 必须像这个角色本人在夜里取舍，带一点 MBTI 气质，不要模板句。
-4. 好人不能写狼队视角；狼人也不能把自己写成别的真实身份。
-5. confidence 必须是 0 到 1 的数字。"""
+        system_prompt = prompt_registry.render("werewolf_night_prompt", {
+            "chooser_name": chooser_state.name,
+            "chooser_id": chooser_state.agent_id,
+            "role_name": role_name,
+            "mbti_type": chooser_state.mbti_type,
+            "iq_level": chooser_state.iq_level,
+            "persona_brief": self._build_night_persona_brief(chooser_state),
+            "action_name": action_name,
+            "action_summary": action_summary,
+            "extra_context": extra_context or "暂无",
+            "table_summary": self._build_night_table_summary(),
+            "candidates_label": "可选项",
+            "candidates_text": option_text,
+            "memory_context": memory_context or "暂无",
+            "public_history": public_history,
+            "private_brief": self._build_night_private_brief(chooser_state),
+            "vote_target_label": "可选项ID",
+        })
         aliases: Dict[str, List[str]] = {}
         for option_id, label in options.items():
             alias_tokens = [label]
@@ -1422,6 +1761,12 @@ class WerewolfService:
             return {**result, "used_llm": False, "fallback_reason": str(exc)}
 
     def _build_discussion_prompt(self, agent_state: WerewolfAgentState) -> str:
+        """渲染完整讨论提示词（兼容旧调用：静态 + 动态拼回）。"""
+        static_text, dynamic_text = self._build_discussion_prompt_parts(agent_state)
+        return f"{static_text}\n\n{dynamic_text}".strip()
+
+    def _build_discussion_prompt_parts(self, agent_state: WerewolfAgentState) -> tuple:
+        """缓存友好拆分：(每局稳定前缀, 本轮局势简报)。"""
         role_name = get_role_name_cn(agent_state.role)
         teammates = [
             teammate for teammate in self.get_alive_werewolves()
@@ -1436,59 +1781,79 @@ class WerewolfService:
                 if target_id in self.state.agents
             )
 
-        return f"""你正在参与一局狼人杀白天讨论，请根据你的身份和场上信息发言。
+        return prompt_registry.render_split("werewolf_discussion_prompt", {
+            "agent_id": agent_state.agent_id,
+            "agent_name": agent_state.name,
+            "role_name": role_name,
+            "mbti_type": agent_state.mbti_type,
+            "iq_level": agent_state.iq_level,
+            "personality_profile": self._build_personality_profile(agent_state.mbti_type, agent_state.iq_level),
+            "character_style": self._build_character_style(agent_state),
+            "teammate_text": teammate_text,
+            "seer_results": seer_results,
+            "death_info": self._format_death_info(),
+            "alive_players": self._format_alive_players(),
+            "recent_discussion": self._format_recent_discussion(),
+            "private_rules": self._build_private_knowledge_rules(agent_state),
+        })
 
-## 你的身份
-- 玩家 ID: {agent_state.agent_id}
-- 名字: {agent_state.name}
-- 公开身份: 未知
-- 真实角色: {role_name}
-- MBTI: {agent_state.mbti_type}
-- IQ: {agent_state.iq_level}
+    def _build_opening_prompt(self, agent_state: WerewolfAgentState) -> str:
+        return prompt_registry.render("werewolf_opening_prompt", {
+            "agent_id": agent_state.agent_id,
+            "agent_name": agent_state.name,
+            "role_name": get_role_name_cn(agent_state.role),
+            "mbti_type": agent_state.mbti_type,
+            "iq_level": agent_state.iq_level,
+            "personality_profile": self._build_personality_profile(agent_state.mbti_type, agent_state.iq_level),
+            "character_style": self._build_character_style(agent_state),
+            "alive_players": self._format_alive_players(),
+            "private_rules": self._build_private_knowledge_rules(agent_state),
+        })
 
-## 你的人设约束
-{self._build_personality_profile(agent_state.mbti_type, agent_state.iq_level)}
+    def _build_chat_prompt(self, agent_state: WerewolfAgentState) -> str:
+        """渲染完整群聊提示词（兼容旧调用：静态 + 动态拼回）。"""
+        static_text, dynamic_text = self._build_chat_prompt_parts(agent_state)
+        return f"{static_text}\n\n{dynamic_text}".strip()
 
-## 你的已知信息
-- 狼人同伴: {teammate_text}
-- 预言家查验结果: {seer_results}
-- 今晚死亡情况:
-{self._format_death_info()}
+    def _build_chat_prompt_parts(self, agent_state: WerewolfAgentState) -> tuple:
+        """缓存友好拆分：(每局稳定前缀, 本轮局势简报)。"""
+        role_name = get_role_name_cn(agent_state.role)
+        teammates = [
+            teammate for teammate in self.get_alive_werewolves()
+            if teammate.agent_id != agent_state.agent_id
+        ]
+        teammate_text = "、".join(teammate.name for teammate in teammates) or "暂无"
+        seer_results = "暂无"
+        if agent_state.role == WerewolfRole.SEER and agent_state.seer_check_results:
+            seer_results = "\n".join(
+                f"- {self.state.agents[target_id].name}: {'狼人' if faction == WerewolfFaction.WEREWOLF else '好人'}"
+                for target_id, faction in agent_state.seer_check_results.items()
+                if target_id in self.state.agents
+            )
 
-## 当前存活玩家
-{self._format_alive_players()}
-
-## 最近的讨论
-{self._format_recent_discussion()}
-
-## 私密思考边界
-{self._build_private_knowledge_rules(agent_state)}
-
-## 发言要求
-1. 说 2-4 句自然中文，建议 80-180 字。
-2. 你可以提到别人的名字，但不要泄露“你是 AI”或输出解释。
-3. 狼人要伪装，好人要尽量分析。
-4. 发言尽量包含：你对局势的判断、你怀疑或信任的人、以及你建议今天怎么推进。
-5. 发言必须明显符合你的 MBTI 人设、说话风格和 IQ 层次，不能所有人都像同一种语气。
-6. 同一个角色应保持稳定口吻：强势的人更像带队，细腻的人更犹豫，理性的人更注重逻辑，感性的人更注重情绪与关系。
-7. 你的公开发言必须有一个鲜明的个人语言动作，例如下判断、追问漏洞、安抚情绪、回忆细节、反问挑刺、强调规则中的一种，不能只是平铺直叙。
-8. 禁止使用泛化模板，比如“先听听大家发言”“我觉得有点可疑”“大家不要乱投”这类任何角色都能说的话，除非你把它说得非常符合你的人设。
-9. 要让旁观者不看标签也能听出你更像带队者、观察者、照顾者、辩手、艺术型直觉派或行动派。
-10. `thought` 必须严格符合你的真实角色和已知信息，不能把自己写成别的身份；只有狼人能在内心提到狼人同伴，好人阵营不能假装自己是狼人。
-11. 好人阵营在 `thought` 中不能出现“狼人同伴/狼队策略/保护狼队/我是狼人”等措辞；狼人阵营也不能把自己写成神职或村民本人。
-12. suspicion 的 key 必须使用玩家 ID。
-13. 如果你不是狼人，涉及狼人动机时只能写“可能/像/怀疑/更像”，不能写成“我知道/明显/就是/合理策略”。
-14. 下笔前先自检：哪些是“已知事实”，哪些只是“个人推测”；推测必须保留不确定语气。
-15. 只输出 JSON。
-
-JSON 格式:
-{{
-  "thought": "你的内心分析",
-  "speech": "你的公开发言",
-  "suspicion": {{"玩家ID": 0}}
-}}"""
+        return prompt_registry.render_split("werewolf_chat_prompt", {
+            "agent_id": agent_state.agent_id,
+            "agent_name": agent_state.name,
+            "role_name": role_name,
+            "mbti_type": agent_state.mbti_type,
+            "iq_level": agent_state.iq_level,
+            "personality_profile": self._build_personality_profile(agent_state.mbti_type, agent_state.iq_level),
+            "character_style": self._build_character_style(agent_state),
+            "teammate_text": teammate_text,
+            "seer_results": seer_results,
+            "death_info": self._format_death_info(),
+            "alive_players": self._format_alive_players(),
+            "recent_discussion": self._format_recent_discussion(),
+            "private_rules": self._build_private_knowledge_rules(agent_state),
+        })
 
     def _build_voting_prompt(self, agent_state: WerewolfAgentState, valid_agent_ids: List[str]) -> str:
+        """渲染完整投票提示词（兼容旧调用：静态 + 动态拼回）。"""
+        static_text, dynamic_text = self._build_voting_prompt_parts(agent_state, valid_agent_ids)
+        return f"{static_text}\n\n{dynamic_text}".strip()
+
+    def _build_voting_prompt_parts(self, agent_state: WerewolfAgentState, valid_agent_ids: List[str]) -> tuple:
+        """缓存友好拆分：(每局稳定前缀, 本轮投票简报)。"""
         role_name = get_role_name_cn(agent_state.role)
         suspicion_scores = self.agents[agent_state.agent_id].suspicion_scores
         suspicion_text = "\n".join(
@@ -1502,75 +1867,123 @@ JSON 格式:
             if target_id in self.state.agents
         ) or "（无）"
 
-        return f"""你正在参与狼人杀投票阶段，请根据今天的发言投票。
+        return prompt_registry.render_split("werewolf_voting_prompt", {
+            "agent_id": agent_state.agent_id,
+            "agent_name": agent_state.name,
+            "role_name": role_name,
+            "mbti_type": agent_state.mbti_type,
+            "iq_level": agent_state.iq_level,
+            "personality_profile": self._build_personality_profile(agent_state.mbti_type, agent_state.iq_level),
+            "character_style": self._build_character_style(agent_state),
+            "recent_discussion": self._format_recent_discussion(),
+            "votable_players": votable_players,
+            "suspicion_text": suspicion_text,
+            "private_rules": self._build_private_knowledge_rules(agent_state),
+        })
 
-## 你的身份
-- 玩家 ID: {agent_state.agent_id}
-- 名字: {agent_state.name}
-- 真实角色: {role_name}
-- MBTI: {agent_state.mbti_type}
-- IQ: {agent_state.iq_level}
+    def _normalize_name_references(self, text: str) -> str:
+        """兜底清洗：把模型回复中漏网的玩家 ID（werewolf_agent_6 / agent_2）
+        与座位号（6号）替换成对应角色名，保证对局文本里不出现编码名。"""
+        if not text:
+            return text
 
-## 你的人设约束
-{self._build_personality_profile(agent_state.mbti_type, agent_state.iq_level)}
+        import re as _re
 
-## 今天的讨论
-{self._format_recent_discussion()}
+        id_to_name = {
+            agent_id: (state.name or agent_id)
+            for agent_id, state in self.state.agents.items()
+        }
+        if not id_to_name:
+            return text
 
-## 可投票玩家
-{votable_players}
+        def _replace_id(match: "_re.Match") -> str:
+            token = match.group(0)
+            if token in id_to_name:
+                return id_to_name[token]
+            # agent_4 ↔ werewolf_agent_4 双向补全
+            alt = (
+                f"werewolf_{token}" if not token.startswith("werewolf_")
+                else token.replace("werewolf_", "", 1)
+            )
+            return id_to_name.get(alt, token)
 
-## 你的怀疑分
-{suspicion_text}
+        def _replace_seat(match: "_re.Match") -> str:
+            n = int(match.group(1))
+            return id_to_name.get(f"werewolf_agent_{n}", match.group(0))
 
-## 私密思考边界
-{self._build_private_knowledge_rules(agent_state)}
+        text = _re.sub(r"(?:werewolf_)?agent_\d+", _replace_id, text)
+        # 座位号称呼（4号、6号…），排除「号位/号房」等复合名词
+        text = _re.sub(r"(\d{1,2})\s*号(?![位房间屋])", _replace_seat, text)
+        return text
 
-## 投票要求
-1. vote 必须是可投票玩家的 ID。
-2. confidence 取 0 到 1。
-3. thought 必须体现你的 MBTI 性格和思维方式。
-4. 投票理由要像这个角色本人会说的话，不要千篇一律。
-5. 你的投票分析必须带有鲜明的人设动作，例如控场、拆逻辑、凭细节记忆、凭关系敏感、凭规则或凭直觉，而不是统一模板。
-6. 禁止使用“信息还不够所以先随便投/先跟着大家走”这种偷懒式空话，除非这正是你的人设弱点并明确写出来。
-7. `thought` 必须严格符合你的真实角色和已知信息，不能把自己写成别的身份。
-8. 好人阵营不能在 `thought` 中拥有狼队视角；狼人也不能把自己的私密独白写成神职自白。
-9. 如果你不是狼人，分析狼人时只能写推测，不能把“狼队在想什么/狼队昨晚怎么做/某人在保护狼队利益”写成确定事实。
-10. 写 thought 前先区分“已知事实”和“个人推测”，推测要保留不确定语气。
-11. 只输出 JSON。
+    def submit_player_speech(self, agent_id: str, content: str) -> Dict[str, Any]:
+        """夺席模式：玩家为被接管的 agent 提交公开发言（在下一轮该 agent
+        发言时由事件流消费，替代 LLM 生成）。"""
+        agent_state = self.get_agent_state(agent_id)
+        if not agent_state or not agent_state.is_alive:
+            raise ValueError(f"Invalid speaker: {agent_id}")
+        text = (content or "").strip()
+        if not text:
+            raise ValueError("发言内容不能为空")
+        if len(text) > 500:
+            text = text[:500]
+        self.pending_player_speeches[agent_id] = text
+        return {"success": True, "agent_id": agent_id, "queued": True}
 
-JSON 格式:
-{{
-  "thought": "你的投票分析",
-  "vote": "玩家ID",
-  "confidence": 0.75
-}}"""
+    def consume_player_speech(self, agent_id: str) -> Optional[str]:
+        """取走（若有）玩家为该 agent 预先提交的发言。"""
+        return self.pending_player_speeches.pop(agent_id, None)
 
-    async def run_discussion_turn(self, agent_id: str) -> Dict[str, Any]:
-        """Generate one discussion turn using the agent's LLM."""
+    def is_player_agent(self, agent_id: str) -> bool:
+        """该席位是否由真人玩家接管（参与模式）。"""
+        return self.player_mode == "participate" and agent_id == self.player_agent_id
+
+    async def wait_for_player_speech(self, agent_id: str, timeout: float = 240.0) -> Optional[str]:
+        """等待玩家为该席位提交公开发言；超时返回 None（由事件流回退 LLM）。"""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        while loop.time() < deadline:
+            text = self.pending_player_speeches.pop(agent_id, None)
+            if text is not None:
+                return text
+            await asyncio.sleep(0.5)
+        return None
+
+    async def wait_for_player_vote(self, agent_id: str, timeout: float = 240.0) -> bool:
+        """等待玩家通过 /vote 为该席位提交投票；返回是否在超时前完成。"""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        while loop.time() < deadline:
+            if agent_id in self.state.votes_this_round:
+                return True
+            await asyncio.sleep(0.5)
+        return False
+
+    async def run_opening_turn(self, agent_id: str) -> Dict[str, Any]:
+        """Generate one opening speech (game start, before the first night)."""
         agent_state = self.get_agent_state(agent_id)
         if not agent_state or not agent_state.is_alive:
             raise ValueError(f"Invalid speaker: {agent_id}")
 
         agent = self.agents[agent_id]
         response = await agent.generate_description(
-            system_prompt=self._build_discussion_prompt(agent_state),
+            system_prompt=self._build_opening_prompt(agent_state),
             conversation_history=self.state.conversation_history[-12:],
             current_round=self.state.current_round,
         )
-        speech = (response.get("speech") or "").strip() or f"{agent_state.name} 暂时没有明确判断。"
+        speech = (response.get("speech") or "").strip() or f"{agent_state.name} 已入座。"
+        speech = self._normalize_name_references(speech)
         thought = self._sanitize_role_consistent_thought(agent_state, response.get("thought", ""))
         suspicion = self._sanitize_suspicion_scores(
             response.get("suspicion", {}),
             speaker_id=agent_id,
         )
 
-        self.state.speakers_this_round.append(agent_id)
         message = {
             "round": self.state.current_round,
             "agent_id": agent_id,
             "agent_name": agent_state.name,
-            "type": "discussion",
+            "type": "opening",
             "content": speech,
             "thought": thought,
             "suspicion": suspicion,
@@ -1583,6 +1996,120 @@ JSON 格式:
                 "agent_id": agent_id,
                 "agent_name": agent_state.name,
                 "speech": speech,
+                "thought": thought,
+                "suspicion": suspicion,
+                "stage": "opening",
+            },
+        )
+        return message
+
+    async def run_discussion_turn(
+        self, agent_id: str, override_content: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Generate one discussion turn using the agent's LLM.
+
+        override_content: 夺席模式下玩家代打的发言文本；提供时跳过 LLM，
+        直接以该文本作为本回合公开发言。
+        群聊模式（chat_style=group_chat）下由 LLM 生成多条短消息气泡。
+        """
+        agent_state = self.get_agent_state(agent_id)
+        if not agent_state or not agent_state.is_alive:
+            raise ValueError(f"Invalid speaker: {agent_id}")
+
+        bubbles: List[str] = []
+        if override_content:
+            bubbles = [self._normalize_name_references(override_content.strip())]
+            thought = ""
+            suspicion: Dict[str, Any] = {}
+        elif self.chat_style == "group_chat":
+            agent = self.agents[agent_id]
+            static_text, dynamic_text = self._build_chat_prompt_parts(agent_state)
+            history = list(self.state.conversation_history[-20:])
+            if dynamic_text:
+                # 局势简报作为对话末尾的 user 消息，保持 system 前缀稳定以利用提示词缓存
+                history.append({"role": "user", "content": dynamic_text})
+            chat = await agent.generate_chat_messages(
+                system_prompt=static_text,
+                conversation_history=history,
+                current_round=self.state.current_round,
+            )
+            bubbles = [
+                self._normalize_name_references((bubble or "").strip())
+                for bubble in (chat.get("messages") or [])
+            ]
+            bubbles = [bubble for bubble in bubbles if bubble] or ["……"]
+            thought = self._sanitize_role_consistent_thought(agent_state, chat.get("thought", ""))
+            suspicion = self._sanitize_suspicion_scores(
+                chat.get("suspicion", {}),
+                speaker_id=agent_id,
+            )
+        else:
+            agent = self.agents[agent_id]
+            static_text, dynamic_text = self._build_discussion_prompt_parts(agent_state)
+            history = list(self.state.conversation_history[-12:])
+            if dynamic_text:
+                # 局势简报作为对话末尾的 user 消息，保持 system 前缀稳定以利用提示词缓存
+                history.append({"role": "user", "content": dynamic_text})
+            response = await agent.generate_description(
+                system_prompt=static_text,
+                conversation_history=history,
+                current_round=self.state.current_round,
+            )
+            speech = (response.get("speech") or "").strip() or f"{agent_state.name} 暂时没有明确判断。"
+            bubbles = [self._normalize_name_references(speech)]
+            thought = self._sanitize_role_consistent_thought(agent_state, response.get("thought", ""))
+            suspicion = self._sanitize_suspicion_scores(
+                response.get("suspicion", {}),
+                speaker_id=agent_id,
+            )
+
+        self.state.speakers_this_round.append(agent_id)
+
+        # 群聊模式：每条气泡单独写入对话历史，后续回合把群聊记录作为上下文
+        if len(bubbles) > 1:
+            for bubble_index, bubble in enumerate(bubbles):
+                self.state.conversation_history.append({
+                    "round": self.state.current_round,
+                    "agent_id": agent_id,
+                    "agent_name": agent_state.name,
+                    "type": "discussion",
+                    "content": bubble,
+                    "thought": thought if bubble_index == 0 else "",
+                    "suspicion": suspicion if bubble_index == 0 else {},
+                    "bubble_index": bubble_index + 1,
+                    "bubble_total": len(bubbles),
+                })
+        else:
+            self.state.conversation_history.append({
+                "round": self.state.current_round,
+                "agent_id": agent_id,
+                "agent_name": agent_state.name,
+                "type": "discussion",
+                "content": bubbles[0],
+                "thought": thought,
+                "suspicion": suspicion,
+            })
+
+        speech = " / ".join(bubbles)
+        message = {
+            "round": self.state.current_round,
+            "agent_id": agent_id,
+            "agent_name": agent_state.name,
+            "type": "discussion",
+            "content": speech,
+            "speech": speech,
+            "bubbles": bubbles,
+            "thought": thought,
+            "suspicion": suspicion,
+        }
+
+        self._record_event(
+            GameEventType.DISCUSSION,
+            {
+                "agent_id": agent_id,
+                "agent_name": agent_state.name,
+                "speech": speech,
+                "bubbles": bubbles,
                 "thought": thought,
                 "suspicion": suspicion,
             },
@@ -1604,13 +2131,20 @@ JSON 格式:
             raise ValueError("No valid voting targets")
 
         agent = self.agents[agent_id]
+        static_text, dynamic_text = self._build_voting_prompt_parts(agent_state, valid_agent_ids)
+        history = list(self.state.conversation_history[-12:])
+        if dynamic_text:
+            # 投票简报作为对话末尾的 user 消息，保持 system 前缀稳定以利用提示词缓存
+            history.append({"role": "user", "content": dynamic_text})
         response = await agent.generate_vote(
-            system_prompt=self._build_voting_prompt(agent_state, valid_agent_ids),
-            conversation_history=self.state.conversation_history[-12:],
+            system_prompt=static_text,
+            conversation_history=history,
             valid_agent_ids=valid_agent_ids,
             current_round=self.state.current_round,
         )
-        thought = self._sanitize_role_consistent_thought(agent_state, response.get("thought", ""))
+        thought = self._normalize_name_references(
+            self._sanitize_role_consistent_thought(agent_state, response.get("thought", ""))
+        )
 
         vote_target = response["vote"]
         vote_result = self.record_vote(agent_id, vote_target)

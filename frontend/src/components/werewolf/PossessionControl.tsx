@@ -6,7 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import { User, X, Send, Moon, MessageCircle, Vote, Shield } from 'lucide-react';
 import type { Agent, AgentRoleResponse } from '../../services/werewolfService';
-import { getAgentRole, executeNightAction, submitVote } from '../../services/werewolfService';
+import { getAgentRole, executeNightAction, submitVote, submitPlayerSpeech } from '../../services/werewolfService';
 
 interface PossessionControlProps {
   gameId: string;
@@ -29,6 +29,7 @@ const PossessionControl: React.FC<PossessionControlProps> = ({
   const [selectedTarget, setSelectedTarget] = useState<string>('');
   const [actionType, setActionType] = useState<string>('');
   const [speechText, setSpeechText] = useState<string>('');
+  const [speechQueued, setSpeechQueued] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>('');
   const [showTargets, setShowTargets] = useState(false);
@@ -87,6 +88,27 @@ const PossessionControl: React.FC<PossessionControlProps> = ({
       if (onActionComplete) onActionComplete();
     } catch (err: any) {
       setError(err.message || '投票失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePlayerSpeech = async () => {
+    if (!possessedAgent || !speechText.trim()) {
+      setError('请输入发言内容');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+
+    try {
+      await submitPlayerSpeech(gameId, possessedAgent.agent_id, speechText.trim());
+      setSpeechText('');
+      setSpeechQueued(true);
+      if (onActionComplete) onActionComplete();
+    } catch (err: any) {
+      setError(err.message || '发言提交失败');
     } finally {
       setLoading(false);
     }
@@ -270,21 +292,24 @@ const PossessionControl: React.FC<PossessionControlProps> = ({
               <h4 className="text-lg font-semibold text-ww-gold/80">白天发言</h4>
               <textarea
                 value={speechText}
-                onChange={(e) => setSpeechText(e.target.value)}
-                placeholder="输入你的发言内容..."
+                onChange={(e) => {
+                  setSpeechText(e.target.value);
+                  setSpeechQueued(false);
+                }}
+                placeholder="输入你的发言内容...（轮到该玩家发言时代你发出）"
                 className="h-32 w-full resize-none rounded-2xl border border-white/20 bg-black/40 px-4 py-3 text-white focus:border-ww-gold focus:outline-none"
               />
+              {speechQueued && (
+                <p className="rounded-xl border border-green-400/30 bg-green-400/10 px-3 py-2 text-xs text-green-300">
+                  已提交，轮到 {possessedAgent.name} 发言时会自动使用这段内容。
+                </p>
+              )}
               <button
-                onClick={() => {
-                  // In a real implementation, this would send the speech to the backend
-                  console.log('Speech:', speechText);
-                  setSpeechText('');
-                  if (onActionComplete) onActionComplete();
-                }}
+                onClick={handlePlayerSpeech}
                 disabled={!speechText.trim() || loading}
                 className="w-full ww-button-primary flex items-center justify-center gap-2"
               >
-                发送发言
+                {loading ? '提交中...' : '提交发言'}
                 <Send className="w-4 h-4" />
               </button>
             </div>

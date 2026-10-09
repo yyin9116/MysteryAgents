@@ -279,17 +279,8 @@ export function getEventColor(eventType: string): string {
 }
 
 export function getEventIcon(eventType: string): string {
-  const iconMap: Record<string, string> = {
-    'phase_change': '🌓',
-    'night_action': '🌙',
-    'discussion': '💬',
-    'vote': '🗳️',
-    'elimination': '💀',
-    'death_announcement': '⚰️',
-    'game_over': '🏆'
-  };
-
-  return iconMap[eventType] || '📌';
+  // 禁止 emoji：UI 统一使用 lucide 图标，此处仅返回事件类型 key
+  return eventType;
 }
 
 export function getEventDisplayName(eventType: string): string {

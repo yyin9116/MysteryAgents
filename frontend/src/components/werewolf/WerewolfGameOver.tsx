@@ -1,19 +1,97 @@
 /**
- * Werewolf Game Over Component
- * 狼人杀游戏结束展示组件
+ * Werewolf Game Over — 对局结算（夜幕协议 · 界面-胜负结算 3:1067）
+ * 结构：Header / WinnerBanner / StatsRow / MainRow(名单+关键事件) / ActionBar
  */
 
-import React, { useState } from 'react';
-import { Trophy, Users, Clock, Home, RotateCcw, X } from 'lucide-react';
+import React from 'react';
+import { Home, Play, RotateCcw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import type { Agent } from '../../services/werewolfService';
+import type { Agent, WerewolfEvent } from '../../services/werewolfService';
 
 interface WerewolfGameOverProps {
   winner: 'werewolf' | 'good';
   reason: string;
   currentRound: number;
   agents: Agent[];
+  events?: WerewolfEvent[];
+  gameId?: string;
   onReplay?: () => void;
+  onRematch?: () => void;
+}
+
+/** 角色色（对齐设计令牌 role/*） */
+const ROLE_COLOR: Record<string, string> = {
+  狼人: 'text-role-wolf',
+  预言家: 'text-role-seer',
+  女巫: 'text-role-witch',
+  守卫: 'text-role-guard',
+  村民: 'text-role-civilian',
+  猎人: 'text-gold',
+};
+
+const roleColorClass = (roleCn?: string) =>
+  (roleCn && ROLE_COLOR[roleCn]) || 'text-text-secondary';
+
+const ROLE_DOT: Record<string, string> = {
+  狼人: 'bg-role-wolf',
+  预言家: 'bg-role-seer',
+  女巫: 'bg-role-witch',
+  守卫: 'bg-role-guard',
+  村民: 'bg-role-civilian',
+  猎人: 'bg-gold',
+};
+
+const roleDotClass = (roleCn?: string) =>
+  (roleCn && ROLE_DOT[roleCn]) || 'bg-white/25';
+
+interface KeyEvent {
+  tag: string;
+  night: boolean;
+  text: string;
+  kindLabel: string;
+  kindClass: string;
+}
+
+const KIND_STYLE: Record<string, string> = {
+  kill: 'text-role-wolf',
+  poison: 'text-role-witch',
+  exile: 'text-text-secondary',
+  win: 'text-gold',
+};
+
+/** 从事件流提炼关键事件（倒序，最新在上） */
+function extractKeyEvents(events: WerewolfEvent[]): KeyEvent[] {
+  const relevant = events.filter((e) =>
+    ['elimination', 'death_announcement', 'game_over'].includes(e.type)
+  );
+  return relevant.slice(-14).reverse().map((e) => {
+    const night = e.phase ? e.phase === 'night' : e.type === 'death_announcement';
+    const round = typeof e.round === 'number' ? e.round : undefined;
+    const tag = round != null ? `${night ? 'N' : 'D'}${round}` : '—';
+    const cause = String(e.cause || e.death_cause || '').toLowerCase();
+    let kindLabel = '事件';
+    let kindKey = 'exile';
+    if (e.type === 'game_over') {
+      kindLabel = '终局';
+      kindKey = 'win';
+    } else if (cause.includes('毒') || cause.includes('poison')) {
+      kindLabel = '毒杀';
+      kindKey = 'poison';
+    } else if (cause.includes('刀') || cause.includes('杀') || cause.includes('kill') || e.type === 'death_announcement') {
+      kindLabel = '击杀';
+      kindKey = 'kill';
+    } else if (cause.includes('逐') || cause.includes('票') || cause.includes('exile') || e.type === 'elimination') {
+      kindLabel = '放逐';
+      kindKey = 'exile';
+    }
+    return {
+      tag,
+      night,
+      text: String(e.message || e.text || '').trim(),
+      kindLabel,
+      kindClass: KIND_STYLE[kindKey] || 'text-text-secondary',
+    };
+  }).filter((k) => k.text);
 }
 
 const WerewolfGameOver: React.FC<WerewolfGameOverProps> = ({
@@ -21,147 +99,157 @@ const WerewolfGameOver: React.FC<WerewolfGameOverProps> = ({
   reason,
   currentRound,
   agents,
+  events = [],
+  gameId,
   onReplay,
+  onRematch,
 }) => {
   const navigate = useNavigate();
-  const [showRoster, setShowRoster] = useState(false);
 
-  const aliveAgents = agents.filter(a => a.is_alive);
-  const deadAgents = agents.filter(a => !a.is_alive);
+  const aliveAgents = agents.filter((a) => a.is_alive);
+  const deadAgents = agents.filter((a) => !a.is_alive);
+  const keyEvents = extractKeyEvents(events);
 
-  const winnerText = winner === 'werewolf' ? '狼人阵营' : '好人阵营';
-  const winnerColor = winner === 'werewolf' ? 'text-red-400' : 'text-blue-400';
-  const winnerGlow = winner === 'werewolf'
-    ? 'shadow-[0_0_30px_rgba(239,68,68,0.5)]'
-    : 'shadow-[0_0_30px_rgba(96,165,250,0.5)]';
-  const getFactionLabel = (faction?: string) => {
-    if (faction === 'werewolf') return '狼人阵营';
-    if (faction === 'good') return '好人阵营';
-    return '阵营未公开';
-  };
+  const isWolfWin = winner === 'werewolf';
+  // 胜负横幅色调：狼人胜完全贴稿（violet），好人胜用 success 绿
+  const bannerText = isWolfWin ? 'text-violet' : 'text-success';
+  const bannerBg = isWolfWin
+    ? 'bg-violet/[0.14] border-violet/60'
+    : 'bg-success/[0.12] border-success/50';
+  const winnerText = isWolfWin ? '狼人阵营 · 胜利' : '好人阵营 · 胜利';
+
+  const stats: Array<{ label: string; value: string; valueClass: string }> = [
+    { label: '总回合 ROUNDS', value: String(currentRound), valueClass: 'text-gold' },
+    { label: '终局存活 ALIVE', value: `${aliveAgents.length} / ${agents.length}`, valueClass: 'text-text-primary' },
+    { label: '事件总数 EVENTS', value: String(events.length), valueClass: 'text-text-primary' },
+    { label: '玩家总数 PLAYERS', value: String(agents.length), valueClass: 'text-violet' },
+  ];
 
   return (
-    <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-3 sm:p-4 animate-fadeIn">
-      <div className="ww-card relative w-full max-w-3xl overflow-hidden">
-        {/* Winner Announcement */}
-        <div className="text-center mb-5 sm:mb-7">
-          <div className={`inline-flex items-center justify-center w-16 h-16 rounded-full bg-ww-gold/20 mb-3 sm:h-20 sm:w-20 sm:mb-4 ${winnerGlow}`}>
-            <Trophy className="w-8 h-8 text-ww-gold sm:w-10 sm:h-10" />
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-[#0D0A14] animate-fadeIn">
+      <div className="mx-auto flex min-h-full w-full max-w-[1180px] flex-col gap-6 px-5 py-8 sm:px-10 sm:py-10">
+        {/* Header */}
+        <header className="flex flex-wrap items-end justify-between gap-4">
+          <div className="flex flex-col gap-1.5">
+            <span className="font-hud text-xs tracking-widest text-text-secondary">
+              GAME OVER · 战局终了
+            </span>
+            <h1 className="text-3xl font-bold text-text-primary sm:text-[34px]">对局结算</h1>
           </div>
-          <h2 className="text-3xl font-bold text-ww-gold mb-2 sm:text-4xl">游戏结束</h2>
-          <p className={`text-xl font-semibold ${winnerColor} mb-2 sm:text-2xl`}>
-            {winnerText} 获胜！
-          </p>
-          <p className="mx-auto max-w-2xl text-sm leading-6 text-white/60 sm:text-base">{reason}</p>
-        </div>
+          {gameId && (
+            <span className="font-hud text-[13px] text-text-secondary/70">{gameId}</span>
+          )}
+        </header>
 
-        {/* Game Statistics */}
-        <div className="grid grid-cols-3 gap-2 mb-5 sm:gap-4 sm:mb-7">
-          <div className="bg-black/30 rounded-2xl p-3 border border-ww-gold/20 text-center sm:p-4">
-            <Clock className="w-5 h-5 text-ww-gold mx-auto mb-2 sm:w-6 sm:h-6" />
-            <div className="text-xl font-bold text-ww-gold sm:text-2xl">{currentRound}</div>
-            <div className="text-xs text-white/60 sm:text-sm">回合</div>
+        {/* WinnerBanner */}
+        <section className={`flex flex-col gap-6 rounded-[18px] border p-6 sm:flex-row sm:items-center sm:justify-between ${bannerBg}`}>
+          <div className="flex flex-col gap-2">
+            <span className="font-hud text-xs tracking-widest text-text-secondary">
+              WINNER · 胜出阵营
+            </span>
+            <p className={`font-display text-3xl font-bold sm:text-[40px] ${bannerText}`}>
+              {winnerText}
+            </p>
           </div>
-          <div className="bg-black/30 rounded-2xl p-3 border border-emerald-400/20 text-center sm:p-4">
-            <Users className="w-5 h-5 text-green-400 mx-auto mb-2 sm:w-6 sm:h-6" />
-            <div className="text-xl font-bold text-green-400 sm:text-2xl">{aliveAgents.length}</div>
-            <div className="text-xs text-white/60 sm:text-sm">存活</div>
+          <div className="flex flex-col gap-1.5">
+            <span className="font-hud text-xs tracking-widest text-text-secondary">结束原因</span>
+            <p className="text-base text-text-primary">{reason}</p>
           </div>
-          <div className="bg-black/30 rounded-2xl p-3 border border-red-400/20 text-center sm:p-4">
-            <Users className="w-5 h-5 text-red-400 mx-auto mb-2 sm:w-6 sm:h-6" />
-            <div className="text-xl font-bold text-red-400 sm:text-2xl">{deadAgents.length}</div>
-            <div className="text-xs text-white/60 sm:text-sm">淘汰</div>
-          </div>
-        </div>
+        </section>
 
-        <button
-          onClick={() => setShowRoster(true)}
-          className="mb-5 w-full rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-left transition-colors hover:border-ww-gold/30 hover:bg-ww-gold/10 sm:mb-7"
-        >
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="font-semibold text-white">查看玩家名单</div>
-              <div className="mt-1 text-sm text-white/45">身份、阵营、存活状态集中在详情面板展示</div>
+        {/* StatsRow */}
+        <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          {stats.map((s) => (
+            <div key={s.label} className="flex flex-col gap-1.5 rounded-[14px] border border-line bg-surface p-4">
+              <span className="font-hud text-[11px] tracking-wider text-text-secondary">{s.label}</span>
+              <span className={`font-display text-2xl font-bold sm:text-[30px] ${s.valueClass}`}>{s.value}</span>
             </div>
-            <Users className="h-5 w-5 shrink-0 text-ww-gold" />
-          </div>
-        </button>
+          ))}
+        </section>
 
-        {/* Action Buttons */}
-        <div className="flex flex-col gap-3 sm:flex-row sm:gap-4">
+        {/* MainRow：名单 + 关键事件 */}
+        <section className="grid flex-1 grid-cols-1 gap-4 lg:grid-cols-2">
+          {/* RosterPanel */}
+          <div className="flex min-h-0 flex-col gap-2.5 rounded-2xl border border-line bg-surface p-5 sm:p-6">
+            <span className="font-hud text-[13px] tracking-widest text-text-secondary">
+              终局名单 ROSTER
+            </span>
+            <div className="scrollbar-none -mx-1 min-h-0 flex-1 overflow-y-auto px-1">
+              <div className="flex flex-col gap-2.5">
+                {[...aliveAgents, ...deadAgents].map((agent) => (
+                  <div
+                    key={agent.agent_id}
+                    className={`flex items-center gap-3 rounded-xl border border-line px-2.5 py-2.5 ${agent.is_alive ? '' : 'opacity-55'}`}
+                  >
+                    <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${roleDotClass(agent.role_cn)}`} />
+                    <span className={`min-w-0 flex-1 truncate text-[15px] ${agent.is_alive ? 'text-text-primary' : 'text-text-primary/60 line-through'}`}>
+                      {agent.name}
+                    </span>
+                    <span className={`shrink-0 text-xs ${roleColorClass(agent.role_cn)}`}>
+                      {agent.role_cn || '身份未公开'}
+                    </span>
+                    <span className={`w-16 shrink-0 text-right font-hud text-xs ${agent.is_alive ? 'text-success' : 'text-text-secondary'}`}>
+                      {agent.is_alive ? '存活' : '出局'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* TimelinePanel */}
+          <div className="flex min-h-0 flex-col gap-2.5 rounded-2xl border border-line bg-surface p-5 sm:p-6">
+            <span className="font-hud text-[13px] tracking-widest text-text-secondary">
+              关键事件回顾 KEY EVENTS
+            </span>
+            <div className="scrollbar-none -mx-1 min-h-0 flex-1 overflow-y-auto px-1">
+              {keyEvents.length > 0 ? (
+                <div className="flex flex-col gap-1">
+                  {keyEvents.map((k, i) => (
+                    <div key={`${k.tag}-${i}`} className="flex items-start gap-3.5 rounded-xl px-3 py-3">
+                      <span className={`w-8 shrink-0 pt-0.5 font-hud text-xs ${k.night ? 'text-gold' : 'text-text-secondary'}`}>
+                        {k.tag}
+                      </span>
+                      <p className="min-w-0 flex-1 text-sm leading-6 text-text-primary">{k.text}</p>
+                      <span className={`shrink-0 pt-0.5 text-[11px] ${k.kindClass}`}>{k.kindLabel}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="px-3 py-6 text-center text-sm text-text-secondary/60">
+                  暂无关键事件记录
+                </p>
+              )}
+            </div>
+          </div>
+        </section>
+
+        {/* ActionBar */}
+        <section className="grid grid-cols-1 gap-3.5 sm:grid-cols-3">
+          <button
+            onClick={onRematch}
+            className="flex items-center justify-center gap-2 rounded-xl bg-violet px-4 py-4 text-base font-bold text-white transition-all hover:brightness-110 active:scale-[0.98]"
+          >
+            <RotateCcw className="h-5 w-5" />
+            再来一局
+          </button>
           {onReplay && (
             <button
               onClick={onReplay}
-              className="flex-1 px-6 py-3 bg-ww-gold/20 border border-ww-gold/50 text-ww-gold rounded-lg hover:bg-ww-gold/30 transition-colors flex items-center justify-center gap-2"
+              className="flex items-center justify-center gap-2 rounded-xl border border-line-strong bg-surface px-4 py-4 text-base text-text-primary transition-all hover:border-violet/40 hover:text-violet active:scale-[0.98]"
             >
-              <RotateCcw className="w-5 h-5" />
+              <Play className="h-5 w-5" />
               查看回放
             </button>
           )}
           <button
             onClick={() => navigate('/')}
-            className="flex-1 ww-button-primary flex items-center justify-center gap-2"
+            className="flex items-center justify-center gap-2 rounded-xl border border-line-strong bg-surface px-4 py-4 text-base text-text-primary transition-all hover:border-violet/40 hover:text-violet active:scale-[0.98]"
           >
-            <Home className="w-5 h-5" />
-            返回主页
+            <Home className="h-5 w-5" />
+            返回大厅
           </button>
-        </div>
-
-        {/* MVP Section (Optional Enhancement) */}
-        <div className="mt-5 p-3 bg-gradient-to-r from-ww-gold/10 to-transparent rounded-2xl border border-ww-gold/20 sm:mt-6 sm:p-4">
-          <p className="text-white/60 text-sm text-center">
-            游戏数据已保存，可通过时间轴回放查看完整过程；未揭示身份会显示为“身份未公开”。
-          </p>
-        </div>
-
-        {showRoster && (
-          <div className="absolute inset-0 z-10 flex flex-col bg-slate-950/95">
-            <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-              <div>
-                <h3 className="text-lg font-bold text-ww-gold">玩家名单</h3>
-                <p className="text-xs text-white/45">存活与淘汰分组展示</p>
-              </div>
-              <button
-                onClick={() => setShowRoster(false)}
-                className="rounded-xl border border-white/10 p-2 text-white/60"
-                aria-label="关闭玩家名单"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="scrollbar-none min-h-0 flex-1 overflow-y-auto p-4">
-              {[
-                ['存活玩家', aliveAgents, 'border-green-500/30', ''],
-                ['淘汰玩家', deadAgents, 'border-red-500/30 opacity-70', 'line-through'],
-              ].map(([title, list, borderClass, nameClass]) => (
-                <div key={title as string} className="mb-5">
-                  <h4 className="mb-3 flex items-center gap-2 text-sm font-semibold text-ww-gold/80">
-                    <Users className="w-4 h-4" />
-                    {title as string} ({(list as Agent[]).length})
-                  </h4>
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    {(list as Agent[]).map((agent) => (
-                      <div
-                        key={agent.agent_id}
-                        className={`bg-black/30 rounded-2xl p-3 border ${borderClass as string}`}
-                      >
-                        <div className={`font-medium text-white ${nameClass as string}`}>{agent.name}</div>
-                        <div className="text-sm text-white/60">
-                          {agent.role_cn || '身份未公开'} · {agent.mbti_type}
-                        </div>
-                        <div className={`text-xs mt-1 ${
-                          agent.faction === 'werewolf' ? 'text-red-400' : 'text-blue-400'
-                        }`}>
-                          {getFactionLabel(agent.faction)}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        </section>
       </div>
     </div>
   );

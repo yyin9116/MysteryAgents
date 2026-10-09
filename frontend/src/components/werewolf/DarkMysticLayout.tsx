@@ -29,10 +29,11 @@ const DarkMysticLayout: React.FC<DarkMysticLayoutProps> = ({ children }) => {
       constructor(width: number, height: number) {
         this.x = Math.random() * width;
         this.y = Math.random() * height;
-        this.size = Math.random() * 2 + 0.5;
-        this.speedX = Math.random() * 0.5 - 0.25;
-        this.speedY = Math.random() * 0.5 - 0.25;
-        this.opacity = Math.random() * 0.5 + 0.2;
+        this.size = Math.random() * 1.6 + 0.4;
+        this.speedX = Math.random() * 0.4 - 0.2;
+        this.speedY = Math.random() * 0.4 - 0.2;
+        // 极淡氛围微光（对齐设计系统氛围层，不再抢视觉）
+        this.opacity = Math.random() * 0.22 + 0.05;
       }
 
       update(width: number, height: number) {
@@ -47,7 +48,7 @@ const DarkMysticLayout: React.FC<DarkMysticLayoutProps> = ({ children }) => {
       }
 
       draw(context: CanvasRenderingContext2D) {
-        context.fillStyle = `rgba(255, 215, 0, ${this.opacity})`;
+        context.fillStyle = `rgba(232, 194, 105, ${this.opacity})`;
         context.beginPath();
         context.arc(this.x, this.y, this.size, 0, Math.PI * 2);
         context.fill();

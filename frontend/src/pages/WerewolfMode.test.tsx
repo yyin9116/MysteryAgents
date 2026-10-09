@@ -22,6 +22,22 @@ vi.mock('lucide-react', () => ({
   RefreshCcw: () => <div data-testid="refresh-icon" />,
   Search: () => <div data-testid="search-icon" />,
   Trash2: () => <div data-testid="trash-icon" />,
+  Skull: () => <div data-testid="skull-icon" />,
+  Sparkles: () => <div data-testid="sparkles-icon" />,
+  Check: () => <div data-testid="check-icon" />,
+  Eye: () => <div data-testid="eye-icon" />,
+  Shield: () => <div data-testid="shield-icon" />,
+  Crosshair: () => <div data-testid="crosshair-icon" />,
+  Users: () => <div data-testid="users-icon" />,
+  Activity: () => <div data-testid="activity-icon" />,
+  Brain: () => <div data-testid="brain-icon" />,
+  Target: () => <div data-testid="target-icon" />,
+  X: () => <div data-testid="x-icon" />,
+  Pause: () => <div data-testid="pause-icon" />,
+  OctagonX: () => <div data-testid="octagon-x-icon" />,
+  Play: () => <div data-testid="play-icon" />,
+  Home: () => <div data-testid="home-icon" />,
+  RotateCcw: () => <div data-testid="rotate-ccw-icon" />,
 }));
 
 vi.mock('../components/werewolf/DarkMysticLayout', () => ({
@@ -161,7 +177,7 @@ describe('WerewolfMode', () => {
     expect(screen.getByText('好人胜')).toBeTruthy();
     expect(screen.getByText('结局：所有狼人被淘汰')).toBeTruthy();
     expect(screen.getByText('2 小时前')).toBeTruthy();
-    expect(screen.getByText('当前结果总数')).toBeTruthy();
+    expect(screen.getAllByText('总数').length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByText('historic_game'));
 
@@ -251,7 +267,8 @@ describe('WerewolfMode', () => {
 
     expect(await screen.findByText('finished_game')).toBeTruthy();
 
-    fireEvent.click(screen.getAllByText('已结束')[0]);
+    // 「已结束」同时出现在统计卡标签与筛选按钮中，这里必须点筛选按钮
+    fireEvent.click(screen.getAllByRole('button', { name: '已结束' })[0]);
     expect(screen.getByText('finished_game')).toBeTruthy();
     await waitFor(() => {
       expect(screen.queryByText('active_game')).toBeNull();

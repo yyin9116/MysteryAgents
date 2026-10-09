@@ -510,3 +510,42 @@ class TestWerewolfAPI:
         game_service = active_werewolf_games[data["game_id"]]
         assert game_service.fast_mode is True
         assert game_service.discussion_turn_limit == 2
+
+    def test_create_game_with_per_agent_model_configs(self):
+        """Test per-slot model overrides and model_label exposure."""
+        override = {
+            "provider": "opencode",
+            "model": "glm-5.3-flash",
+            "api_key": "test-key",
+            "base_url": "https://opencode.ai/zen/go/v1",
+        }
+        response = client.post(
+            "/api/werewolf/create",
+            json={
+                "player_count": 6,
+                "llm_naming": False,
+                "model_config_data": {"provider": "zhipu", "model": "glm-4-flash"},
+                "agent_model_configs": [override, None, None, None, None, None],
+            }
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        from api.werewolf import active_werewolf_games
+        game_service = active_werewolf_games[data["game_id"]]
+
+        # Slot 1 uses its own config; slot 2 inherits the game-level config.
+        assert game_service.agents["werewolf_agent_1"].model_config == override
+        assert game_service.agents["werewolf_agent_2"].model_config == {
+            "provider": "zhipu",
+            "model": "glm-4-flash",
+        }
+
+        # Model labels are exposed without revealing roles.
+        agent_1 = next(a for a in data["agents"] if a["agent_id"] == "werewolf_agent_1")
+        agent_2 = next(a for a in data["agents"] if a["agent_id"] == "werewolf_agent_2")
+        assert agent_1["model_label"] == "opencode/glm-5.3-flash"
+        assert agent_2["model_label"] == "zhipu/glm-4-flash"
+
+        # State also carries model_label for the HUD.
+        assert game_service.state.agents["werewolf_agent_1"].model_label == "opencode/glm-5.3-flash"
