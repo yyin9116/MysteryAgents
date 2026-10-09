@@ -8,6 +8,7 @@ from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+import json
 import logging
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,11 @@ class CreateGameRequest(BaseModel):
     use_balanced_team: bool = Field(default=True)
     # 模型配置 (新格式：统一的 llm_config 对象)
     llm_config: Optional[Dict[str, str]] = None
+    # 主题角色阵容（名字+MBTI+性别绑定），三游戏统一
+    roster: Optional[List[Dict[str, Any]]] = None
+    roster_work: Optional[str] = None
+    # 智能模型分配（按 IQ 分档）
+    auto_assign: Optional[Dict[str, Any]] = None
 
 
 class CreateGameResponse(BaseModel):
@@ -90,6 +96,50 @@ class LoadGameRequest(BaseModel):
     snapshot_id: str
 
 
+@router.post("/generate-words")
+async def generate_words(request: dict):
+    """LLM 生成一对谁是卧底词（同类不同物，相近但可辨），避免玩家无从开始。
+
+    Body: {"hint": "可选方向提示", "model_config_data": {...}}
+    """
+    import uuid as _uuid
+    from services.llm_service import LLMService
+
+    hint = str((request or {}).get("hint") or "").strip()[:100]
+    model_config_data = (request or {}).get("model_config_data")
+    llm = LLMService()
+    prompt = (
+        "请为「谁是卧底」游戏生成一对词语（平民词 / 卧底词）。\n"
+        + (f"方向提示：{hint}\n" if hint else "")
+        + "要求：\n"
+        "1. 两个词必须是同一类别下的不同事物，非常相近但可以通过描述区分开。\n"
+        "2. 各 2-3 个字，中文，都是具体名词（如 牛奶/豆浆、口红/唇釉、地铁/公交）。\n"
+        "3. 不要同义词，不要包含关系（如 水果/苹果 不行）。\n"
+        '只输出 JSON：{"civilian_word": "...", "undercover_word": "..."}，不要解释。'
+    )
+    try:
+        raw = await llm.generate(
+            prompt,
+            temperature=0.9,
+            max_tokens=120,
+            model_config=model_config_data,
+            json_mode=True,
+            session_id=f"words:{_uuid.uuid4().hex[:6]}",
+        )
+        start, end = raw.find("{"), raw.rfind("}")
+        if start == -1 or end == -1:
+            raise ValueError(f"模型未返回 JSON: {raw[:120]}")
+        data = json.loads(raw[start:end + 1])
+        civilian_word = str(data.get("civilian_word") or "").strip().strip('"')
+        undercover_word = str(data.get("undercover_word") or "").strip().strip('"')
+        if not civilian_word or not undercover_word or civilian_word == undercover_word:
+            raise ValueError("词对无效")
+        return {"success": True, "civilian_word": civilian_word, "undercover_word": undercover_word}
+    except Exception as exc:
+        logger.error("Generate words failed: %s", exc)
+        raise HTTPException(400, f"词对生成失败: {exc}")
+
+
 @router.post("/create", response_model=CreateGameResponse)
 async def create_game(request: CreateGameRequest):
     """
@@ -116,7 +166,15 @@ async def create_game(request: CreateGameRequest):
             agents = factory.create_batch(request.agents, llm_config=llm_config)
         else:
             raise HTTPException(400, "Must provide agents or use balanced team")
-        
+
+        # 三游戏统一：主题阵容覆盖 + 智能模型分配（按 IQ 分档）
+        if request.roster:
+            from services.auto_assign import apply_roster, normalize_roster
+            apply_roster(agents, normalize_roster(request.roster))
+        if request.auto_assign:
+            from services.auto_assign import apply_auto_assign, iq_tier_of
+            apply_auto_assign(agents, request.auto_assign, llm_config, iq_tier_of)
+
         # Create game config
         config = GameConfig(
             game_id=game_id,

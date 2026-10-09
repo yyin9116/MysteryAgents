@@ -22,7 +22,7 @@ async def test_game_creation():
     
     # 创建 Agent
     print("\n1. 创建 5 个 Agent...")
-    agents = await factory.create_balanced_team(5)
+    agents = factory.create_balanced_team(5)
     print(f"   ✓ 创建了 {len(agents)} 个 Agent")
     for agent in agents:
         print(f"     - {agent.config.name} ({agent.config.mbti_type}, {agent.config.iq_level})")

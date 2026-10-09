@@ -43,7 +43,7 @@ async def test_sequential_speaking():
     # 手动创建 3 个 Agent
     agents = []
     for i in range(1, 4):
-        agent = await agent_factory.create_agent(
+        agent = agent_factory.create_agent(
             mbti_type=["INFP", "ENTJ", "ISTP"][i-1],
             iq_level=["Mid", "High", "Low"][i-1],
             agent_id=f"agent_{i}"
@@ -63,21 +63,37 @@ async def test_sequential_speaking():
     
     print("\n2. 开始第一轮（描述阶段）...")
     print("=" * 80)
-    result = await game_service.start_game()
-    
+    game_service.start_new_round()
+
+    # 逐个让存活 Agent 顺序发言（对齐当前 GameService API）
+    responses = []
+    while True:
+        speaker_id = game_service.select_next_speaker(strategy="round_robin")
+        if not speaker_id:
+            break
+        speak_result = await game_service.agent_speak(speaker_id)
+        responses.append({
+            "agent_id": speaker_id,
+            "content": speak_result.get("speech", ""),
+            "thought": speak_result.get("thought", ""),
+            "suspicion": speak_result.get("suspicion", {}),
+        })
+
+    result = {"responses": responses}
+
     print("\n" + "=" * 80)
     print("第一轮发言结果:")
     print("=" * 80)
-    
+
     for idx, response in enumerate(result.get('responses', []), 1):
         agent_id = response['agent_id']
         content = response['content']
         thought = response.get('thought', '')
-        
+
         print(f"\n[{idx}] {agent_id}:")
-        print(f"  💭 思考: {thought[:100]}..." if len(thought) > 100 else f"  💭 思考: {thought}")
-        print(f"  💬 发言: {content}")
-        print(f"  🔍 怀疑: {response.get('suspicion', {})}")
+        print(f"  思考: {thought[:100]}..." if len(thought) > 100 else f"  思考: {thought}")
+        print(f"  发言: {content}")
+        print(f"  怀疑: {response.get('suspicion', {})}")
     
     # 检查对话历史
     print("\n" + "=" * 80)

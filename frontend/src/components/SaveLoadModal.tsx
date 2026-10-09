@@ -194,7 +194,7 @@ const SaveLoadModal: React.FC<SaveLoadModalProps> = ({
                                 <h4 className="font-medium mb-2">当前游戏状态</h4>
                                 <div className="space-y-1 text-sm text-text-muted">
                                     <div>游戏ID: {gameId}</div>
-                                    <div>将保存完整的游戏状态，包括所有Agent状态和对话历史</div>
+                                    <div>将保存完整的游戏状态，包括所有玩家状态和对话历史</div>
                                 </div>
                             </div>
 

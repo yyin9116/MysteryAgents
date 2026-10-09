@@ -5,7 +5,7 @@
 
 import React, { useState } from 'react';
 import { streamService, type StreamEvent } from '../services/streamService';
-import { Loader2, Play, X } from 'lucide-react';
+import { Loader2, Play, X, Brain } from 'lucide-react';
 
 interface Message {
     agent_id: string;
@@ -158,7 +158,7 @@ const StreamTest: React.FC = () => {
                                     <span className="text-xs text-text-muted">({msg.agent_id})</span>
                                 </div>
                                 <p className="text-text mb-2">{msg.speech}</p>
-                                <p className="text-sm text-text-muted italic">💭 {msg.thought}</p>
+                                <p className="flex items-center gap-1.5 text-sm text-text-muted italic"><Brain size={12} />{msg.thought}</p>
                             </div>
                         ))}
 

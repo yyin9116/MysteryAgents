@@ -130,9 +130,9 @@ const UserIdentitySetup: React.FC = () => {
                                 onChange={(e) => setMbtiType(e.target.value as MBTIType)}
                                 className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all text-text appearance-none"
                             >
-                                <option value="" disabled className="bg-slate-900 text-text">{t.identity.placeholder}</option>
+                                <option value="" disabled className="bg-surface text-text">{t.identity.placeholder}</option>
                                 {Object.entries(mbtiList).map(([code, label]) => (
-                                    <option key={code} value={code} className="bg-slate-900 text-text">
+                                    <option key={code} value={code} className="bg-surface text-text">
                                         {code} - {label}
                                     </option>
                                 ))}

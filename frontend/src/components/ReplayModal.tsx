@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Play, Pause, SkipBack, SkipForward, ChevronsLeft, ChevronsRight, X, Download, User } from 'lucide-react';
+import { Play, Pause, SkipBack, SkipForward, ChevronsLeft, ChevronsRight, X, Download, User, Brain, MessageCircle, Search, BarChart3 } from 'lucide-react';
 import { replayService } from '../services/replayService';
 import type { ReplayEvent, ReplayProgress } from '../services/replayService';
 
@@ -165,18 +165,18 @@ const ReplayModal: React.FC<ReplayModalProps> = ({
                     </div>
 
                     <div className="p-4 rounded-xl bg-white/5 border border-white/10">
-                        <div className="text-sm text-text-muted mb-2">💭 内心想法</div>
+                        <div className="flex items-center gap-1.5 text-sm text-text-muted mb-2"><Brain size={13} /> 内心想法</div>
                         <div className="text-text">{currentEvent.data.thought}</div>
                     </div>
 
                     <div className="p-4 rounded-xl bg-primary/10 border border-primary/20">
-                        <div className="text-sm text-primary mb-2">💬 公开发言</div>
+                        <div className="flex items-center gap-1.5 text-sm text-primary mb-2"><MessageCircle size={13} /> 公开发言</div>
                         <div className="text-lg font-medium">{currentEvent.data.speech}</div>
                     </div>
 
                     {currentEvent.data.suspicion && Object.keys(currentEvent.data.suspicion).length > 0 && (
                         <div className="p-4 rounded-xl bg-white/5 border border-white/10">
-                            <div className="text-sm text-text-muted mb-3">🔍 怀疑度</div>
+                            <div className="flex items-center gap-1.5 text-sm text-text-muted mb-3"><Search size={13} /> 怀疑度</div>
                             <div className="space-y-2">
                                 {Object.entries(currentEvent.data.suspicion).map(([agentId, score]: [string, any]) => (
                                     <div key={agentId} className="flex items-center justify-between">
@@ -233,7 +233,7 @@ const ReplayModal: React.FC<ReplayModalProps> = ({
 
                     {currentEvent.data.vote_details && currentEvent.data.vote_details.length > 0 && (
                         <div className="p-4 rounded-xl bg-white/5 border border-white/10">
-                            <div className="text-sm text-text-muted mb-3">📊 投票详情</div>
+                            <div className="flex items-center gap-1.5 text-sm text-text-muted mb-3"><BarChart3 size={13} /> 投票详情</div>
                             <div className="space-y-2">
                                 {currentEvent.data.vote_details.map((vote: any, i: number) => (
                                     <div key={i} className="flex items-center justify-between text-sm">
