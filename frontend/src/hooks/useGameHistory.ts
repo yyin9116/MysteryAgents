@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 
 export interface GameHistoryItem {
   id: string;
-  type: 'undercover' | 'discussion';
+  type: 'werewolf' | 'undercover' | 'discussion' | 'jubensha';
   timestamp: number;
   config: any;
   status: 'active' | 'completed';
