@@ -55,8 +55,11 @@ from api import (  # noqa: E402
     discussion,
     game,
     game_stream,
+    jubensha,
+    jubensha_stream,
     model_configs,
     models,
+    prompts,
     replay,
     usage,
     user,
@@ -74,7 +77,10 @@ app.include_router(discussion.router)
 app.include_router(characters.router)
 app.include_router(werewolf.router)
 app.include_router(werewolf_stream.router)
+app.include_router(jubensha.router)
+app.include_router(jubensha_stream.router)
 app.include_router(model_configs.router)
+app.include_router(prompts.router)
 app.include_router(usage.router)
 
 
